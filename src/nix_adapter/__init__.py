@@ -22,7 +22,7 @@ from .systemd import Systemd
 from .testing import FakeNative, FakeProcess
 from .toml import dump_toml, parse_toml
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
 
 __all__ = [
     "BaseAdapter",

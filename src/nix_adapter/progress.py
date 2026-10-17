@@ -2,20 +2,16 @@
 
 from __future__ import annotations
 
-import argparse
-import base64
 import contextlib
-import json
 import os
-import signal
 import sys
 import time
 import unicodedata
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from types import FrameType, TracebackType
-from typing import IO, NoReturn
+from types import TracebackType
+from typing import IO
 
 from rich.console import Console, RenderableType
 from rich.live import Live
@@ -243,14 +239,6 @@ class Progress:
             self._safe(lambda: self._plain(task, status))
         self.refresh()
 
-    def update(self, completed: int, total: int | None = None) -> None:
-        if task := self.active():
-            task.update(completed, total)
-
-    def finish(self, status: str = "done") -> None:
-        if task := self.active():
-            task.finish(status)
-
     def suspend(self) -> None:
         self._suspended += 1
         self._safe(self._stop)
@@ -272,76 +260,3 @@ class Progress:
         for task in reversed(self._tasks.copy()):
             task.finish("failed")
         self._safe(self._stop)
-
-
-def _renderer_main(verbose: bool) -> int:
-    ui = Progress(verbose=verbose)
-
-    def stop(_signal: int, _frame: FrameType | None) -> NoReturn:
-        raise SystemExit(0)
-
-    signal.signal(signal.SIGTERM, stop)
-    signal.signal(signal.SIGINT, stop)
-    try:
-        for line in sys.stdin:
-            identifier = None
-            closing = False
-            try:
-                event = json.loads(line)
-                identifier = event.get("id")
-                kind = event.get("event")
-                if kind == "start":
-                    if ui.active():
-                        ui.finish("failed")
-                    label = event.get("label", "")
-                    if "label_b64" in event:
-                        label = base64.b64decode(
-                            event["label_b64"], validate=True
-                        ).decode("utf-8", "replace")
-                    total = event.get("total")
-                    if not isinstance(label, str) or (
-                        total is not None and type(total) is not int
-                    ):
-                        raise ValueError("invalid event")
-                    ui.start(label, total)
-                elif kind == "update":
-                    completed, total = event.get("completed"), event.get("total")
-                    if type(completed) is not int or (
-                        total is not None and type(total) is not int
-                    ):
-                        raise ValueError("invalid event")
-                    ui.update(completed, total)
-                elif kind == "finish":
-                    ui.finish(event.get("status", "failed"))
-                elif kind == "suspend":
-                    ui.suspend()
-                elif kind == "resume":
-                    ui.resume()
-                elif kind == "close":
-                    ui.close()
-                    closing = True
-            except (ValueError, TypeError, AttributeError, KeyError):
-                # Malformed UI events contain no useful task failure diagnostics.
-                ui.close()
-            if type(identifier) is int:
-                sys.stdout.write(f"{identifier}\n")
-                sys.stdout.flush()
-            if closing:
-                break
-    except (BrokenPipeError, OSError):
-        pass
-    finally:
-        ui.close()
-    return 0
-
-
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--renderer", action="store_true")
-    parser.add_argument("--verbose", action="store_true")
-    args = parser.parse_args()
-    return _renderer_main(args.verbose) if args.renderer else 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

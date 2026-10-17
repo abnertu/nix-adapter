@@ -4,16 +4,13 @@ build-backend = "flit_core.buildapi"
 
 [project]
 name = "nix_adapter"
-version = "0.5.0"
+version = "0.6.0"
 description = "Cross-platform native reconciliation adapter and CLI primitives for Nix deployments"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "rich",
 ]
-
-[project.scripts]
-progress-renderer = "nix_adapter.progress:main"
 
 [project.urls]
 Source = "https://github.com/gin31259461/nix-adapter"

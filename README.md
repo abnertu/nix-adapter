@@ -15,7 +15,7 @@ Python primitives for adapters that reconcile live host state against declaratio
 | `system` | Hostname, timezone, NTP, discard support, sub-UID/GID ranges |
 | `cli` | `run_adapter_cli`: the `preflight` / `plan` / `converge` / `purge` entry point, plus adapter-specific phases |
 | `plan` | `Change` and `render`: what converge would change, with `= ~ + ! -` markers |
-| `progress` | `Progress`: the task display shared with Bash callers (`progress-renderer`) |
+| `progress` | `Progress`: a task display that yields the terminal to native command output |
 | `lock` | `operation_lock`: an exclusive lock around one operation |
 | `testing` | `FakeNative`, `FakeProcess` for adapter tests |
 | `manifest` | `validate`: check a manifest's keys against the adapter's `TypedDict` |

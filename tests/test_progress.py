@@ -1,20 +1,14 @@
 import fcntl
-import json
 import os
 import pty
 import re
-import shutil
-import signal
 import struct
 import subprocess
 import sys
-import tempfile
-import time
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).parent
-RENDERER = [sys.executable, "-m", "nix_adapter.progress", "--renderer"]
 
 
 def _pipes(process):
@@ -23,8 +17,17 @@ def _pipes(process):
     return stdin, stdout
 
 
+def script(body):
+    """A child process that drives Progress the way an adapter does."""
+    return [
+        sys.executable,
+        "-c",
+        "import time\nfrom nix_adapter import Progress\n" + body,
+    ]
+
+
 class ProgressTests(unittest.TestCase):
-    def _pty_process(self, command=RENDERER, env=None, width=80):
+    def _pty_process(self, command, env=None, width=80):
         master, slave = pty.openpty()
         fcntl.ioctl(slave, 0x5414, struct.pack("HHHH", 24, width, 0, 0))
         child_env = os.environ.copy()
@@ -61,84 +64,45 @@ class ProgressTests(unittest.TestCase):
         stdout.close()
         return code, output
 
-    def test_renderer_retains_final_rows_and_handles_unknown_total(self):
-        events = (
-            b"\n".join(
-                json.dumps(event).encode()
-                for event in [
-                    {"event": "start", "label": "compile", "total": 2},
-                    {"event": "update", "completed": 1},
-                    {"event": "finish", "status": "done"},
-                    {"event": "start", "label": "wait", "total": None},
-                    {"event": "finish", "status": "skip"},
-                ]
-            )
-            + b"\n"
-        )
-        result = subprocess.run(RENDERER, input=events, capture_output=True, check=True)
-        output = result.stderr.decode()
-        self.assertIn("[done] compile", output)
-        self.assertIn("[skip] wait", output)
-        self.assertNotIn("\x1b[?1049h", output)
-        self.assertNotIn("\x1b[2J", output)
-
-    def test_suspend_ack_and_resume_do_not_consume_child_stdin(self):
-        process = subprocess.Popen(
-            RENDERER,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-        stdin, stdout = _pipes(process)
-        stdin.write(json.dumps({"event": "start", "label": "native"}).encode() + b"\n")
-        stdin.write(json.dumps({"event": "suspend", "id": 7}).encode() + b"\n")
-        stdin.flush()
-        self.assertEqual(stdout.readline().strip(), b"7")
-        stdin.write(json.dumps({"event": "resume"}).encode() + b"\n")
-        stdin.write(json.dumps({"event": "finish", "status": "done"}).encode() + b"\n")
-        stdin.close()
-        self.assertEqual(process.wait(timeout=2), 0)
-        stdout.close()
-        assert process.stderr is not None
-        process.stderr.close()
-
-    def test_shell_bridge_keeps_native_output_and_returns_success_when_renderer_breaks(
-        self,
-    ):
-        script = ROOT / "progress.sh"
-        command = f"""
-source {script}
-        progress_renderer={shutil.which("false") or "false"}
-progress_init test 0
-progress_start "quoted label"
-progress_suspend
-printf 'native output\\n'
-progress_resume
-progress_finish done
-progress_close
-"""
+    def test_plain_log_keeps_final_rows_and_unknown_totals(self):
         result = subprocess.run(
-            ["bash", "-c", command], capture_output=True, text=True, check=True
+            script(
+                "with Progress('x') as p:\n"
+                "    with p.task('compile', total=2) as t:\n"
+                "        t.update(1)\n"
+                "    p.start('wait').finish('skip')\n"
+            ),
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        self.assertIn("[done] compile", result.stderr)
+        self.assertIn("[skip] wait", result.stderr)
+        self.assertNotIn("\x1b[", result.stderr)
+
+    def test_external_output_reaches_the_terminal_untouched(self):
+        result = subprocess.run(
+            script(
+                "import subprocess, sys\n"
+                "with Progress('x') as p:\n"
+                "    with p.task('native') as t, t.external_output():\n"
+                "        subprocess.run([sys.executable, '-c', 'print(\\'native output\\')'])\n"
+            ),
+            capture_output=True,
+            text=True,
+            check=True,
         )
         self.assertEqual(result.stdout, "native output\n")
 
-    def test_renderer_can_run_under_pty_without_alternate_screen(self):
-        master, process = self._pty_process()
-        stdin, stdout = _pipes(process)
-        stdin.write(
-            json.dumps(
-                {"event": "start", "label": "resize", "total": 1, "id": 6}
-            ).encode()
-            + b"\n"
+    def test_terminal_display_avoids_the_alternate_screen(self):
+        master, process = self._pty_process(
+            script(
+                "with Progress('x') as p:\n"
+                "    t = p.start('resize', total=1)\n"
+                "    time.sleep(0.15)\n"
+                "    t.finish('failed')\n"
+            )
         )
-        stdin.flush()
-        self.assertEqual(stdout.readline().strip(), b"6")
-        fcntl.ioctl(master, 0x5414, struct.pack("HHHH", 24, 24, 0, 0))
-        time.sleep(0.15)
-        stdin.write(
-            json.dumps({"event": "finish", "status": "failed"}).encode() + b"\n"
-        )
-        stdin.close()
         code, raw = self._wait_pty(master, process)
         output = raw.decode(errors="replace")
         self.assertEqual(code, 0, output)
@@ -146,40 +110,32 @@ progress_close
         self.assertNotIn("\x1b[?1049h", output)
 
     def test_verbose_term_dumb_and_empty_no_color_never_emit_ansi(self):
-        for environment in (
-            {"TERM": "xterm-256color"},
-            {"TERM": "dumb"},
-            {"NO_COLOR": ""},
+        for environment, verbose in (
+            ({"TERM": "xterm-256color"}, True),
+            ({"TERM": "dumb"}, False),
+            ({"NO_COLOR": ""}, False),
         ):
-            command = RENDERER + (
-                ["--verbose"] if environment == {"TERM": "xterm-256color"} else []
+            master, process = self._pty_process(
+                script(
+                    f"with Progress('x', verbose={verbose}) as p:\n"
+                    "    with p.task('plain', total=1):\n"
+                    "        pass\n"
+                ),
+                env=environment,
             )
-            master, process = self._pty_process(command, env=environment)
-            stdin, _ = _pipes(process)
-            stdin.write(
-                json.dumps({"event": "start", "label": "plain", "total": 1}).encode()
-                + b"\n"
-            )
-            stdin.write(
-                json.dumps({"event": "finish", "status": "done"}).encode() + b"\n"
-            )
-            stdin.close()
             code, output = self._wait_pty(master, process)
             self.assertEqual(code, 0)
             self.assertNotIn(b"\x1b[", output, environment)
             self.assertIn(b"plain", output, environment)
 
     def test_unknown_task_refreshes_timer_without_explicit_updates(self):
-        master, process = self._pty_process()
-        stdin, stdout = _pipes(process)
-        stdin.write(
-            json.dumps({"event": "start", "label": "waiting", "id": 4}).encode() + b"\n"
+        master, process = self._pty_process(
+            script(
+                "with Progress('x') as p:\n"
+                "    with p.task('waiting'):\n"
+                "        time.sleep(0.25)\n"
+            )
         )
-        stdin.flush()
-        self.assertEqual(stdout.readline().strip(), b"4")
-        time.sleep(0.25)
-        stdin.write(json.dumps({"event": "finish", "status": "done"}).encode() + b"\n")
-        stdin.close()
         code, raw = self._wait_pty(master, process)
         output = raw.decode(errors="replace")
         self.assertEqual(code, 0)
@@ -202,12 +158,13 @@ with Progress('nested') as progress:
         self.assertEqual(len(re.findall(r"✓[^\n]*parent", output)), 1, output)
 
     def test_unicode_label_is_cropped_to_narrow_terminal(self):
-        master, process = self._pty_process(width=20)
-        label = "編輯器-非常長的進度標籤"
-        stdin, _ = _pipes(process)
-        stdin.write(json.dumps({"event": "start", "label": label}).encode() + b"\n")
-        stdin.write(json.dumps({"event": "finish", "status": "skip"}).encode() + b"\n")
-        stdin.close()
+        master, process = self._pty_process(
+            script(
+                "with Progress('x') as p:\n"
+                "    p.start('編輯器-非常長的進度標籤').finish('skip')\n"
+            ),
+            width=20,
+        )
         code, raw = self._wait_pty(master, process)
         output = raw.decode(errors="replace")
         self.assertEqual(code, 0, output)
@@ -215,16 +172,14 @@ with Progress('nested') as progress:
         self.assertIn("↷", output)
 
     def test_ascii_terminal_uses_ascii_status_glyphs(self):
-        master, process = self._pty_process(env={"PYTHONIOENCODING": "ascii"})
-        stdin, _ = _pipes(process)
-        for status in ("done", "skip", "failed"):
-            stdin.write(
-                json.dumps({"event": "start", "label": "ascii"}).encode() + b"\n"
-            )
-            stdin.write(
-                json.dumps({"event": "finish", "status": status}).encode() + b"\n"
-            )
-        stdin.close()
+        master, process = self._pty_process(
+            script(
+                "with Progress('x') as p:\n"
+                "    for status in ('done', 'skip', 'failed'):\n"
+                "        p.start('ascii').finish(status)\n"
+            ),
+            env={"PYTHONIOENCODING": "ascii"},
+        )
         code, raw = self._wait_pty(master, process)
         output = raw.decode(errors="replace")
         self.assertEqual(code, 0, output)
@@ -260,62 +215,3 @@ except Exception as error:
                 )
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertIn("ValueError:business failure", result.stderr)
-
-    def test_renderer_eof_and_sigterm_exit_without_traceback(self):
-        process = subprocess.Popen(
-            RENDERER,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-        stdin, stdout = _pipes(process)
-        stdin.write(json.dumps({"event": "start", "label": "cleanup"}).encode() + b"\n")
-        stdin.close()
-        self.assertEqual(process.wait(timeout=2), 0)
-        stdout.close()
-        assert process.stderr is not None
-        process.stderr.close()
-
-        process = subprocess.Popen(
-            RENDERER,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-        stdin, stdout = _pipes(process)
-        stdin.write(
-            json.dumps({"event": "start", "label": "signal", "id": 9}).encode() + b"\n"
-        )
-        stdin.flush()
-        self.assertEqual(stdout.readline().strip(), b"9")
-        process.send_signal(signal.SIGTERM)
-        _, stderr = process.communicate(timeout=2)
-        self.assertEqual(process.returncode, 0, stderr.decode())
-        self.assertNotIn(b"Traceback", stderr)
-
-    def test_missing_and_stalled_renderers_are_bounded_and_successful(self):
-        script = Path(__file__).parent / "progress.sh"
-        with tempfile.TemporaryDirectory() as directory:
-            stalled = Path(directory) / "stalled"
-            sleep = shutil.which("sleep") or "sleep"
-            stalled.write_text(f"#!/bin/sh\nexec {sleep} 10\n")
-            stalled.chmod(0o755)
-            command = f"""
-source {script}
-progress_renderer={stalled}
-progress_base64=base64
-progress_init test 0
-progress_start stalled
-progress_suspend
-progress_close
-unset progress_renderer
-progress_init test 0
-progress_start missing
-progress_close
-"""
-            started = time.monotonic()
-            result = subprocess.run(
-                ["bash", "-c", command], capture_output=True, text=True, timeout=4
-            )
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertLess(time.monotonic() - started, 4)
