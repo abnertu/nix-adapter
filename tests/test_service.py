@@ -11,7 +11,13 @@ from nix_adapter.service import BaseServiceAdapter
 
 class ServiceAdapterTests(unittest.TestCase):
     def test_path_validation(self):
-        adapter = BaseServiceAdapter(desired={"valid": "/etc/foo", "traversal": "/etc/../bar", "relative": "relative"})
+        adapter = BaseServiceAdapter(
+            desired={
+                "valid": "/etc/foo",
+                "traversal": "/etc/../bar",
+                "relative": "relative",
+            }
+        )
         self.assertEqual(adapter.path("valid"), Path("/etc/foo"))
         with self.assertRaises(Conflict):
             adapter.path("traversal")
@@ -44,7 +50,9 @@ class ServiceAdapterTests(unittest.TestCase):
 
             adapter = BaseServiceAdapter(desired={}, root=root)
             # First write: creates unit, touches pending, returns True
-            changed = adapter.write_unit(unit_path, "[Service]\nExecStart=/bin/test\n", receipt, pending)
+            changed = adapter.write_unit(
+                unit_path, "[Service]\nExecStart=/bin/test\n", receipt, pending
+            )
             self.assertTrue(changed)
             self.assertTrue(unit_path.exists())
             self.assertTrue(pending.exists())
@@ -53,7 +61,9 @@ class ServiceAdapterTests(unittest.TestCase):
             receipt.touch()
 
             # Second write with same content: returns False
-            changed_again = adapter.write_unit(unit_path, "[Service]\nExecStart=/bin/test\n", receipt, pending)
+            changed_again = adapter.write_unit(
+                unit_path, "[Service]\nExecStart=/bin/test\n", receipt, pending
+            )
             self.assertFalse(changed_again)
 
     def test_ensure_system_account(self):

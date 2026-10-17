@@ -30,7 +30,9 @@ def directory_fd(path: Path, *, create: bool = False):
                 except FileExistsError:
                     pass
                 except OSError as error:
-                    raise Conflict(f"failed to create directory {part}: {error}") from None
+                    raise Conflict(
+                        f"failed to create directory {part}: {error}"
+                    ) from None
             try:
                 child = os.open(
                     part,
@@ -84,7 +86,9 @@ def ensure_directory(path: Path, *, mode: int, uid: int, gid: int) -> None:
         os.fsync(fd)
 
 
-def remove_managed_file(path: Path, before_change: Callable[[], None] | None = None) -> bool:
+def remove_managed_file(
+    path: Path, before_change: Callable[[], None] | None = None
+) -> bool:
     try:
         with directory_fd(path.parent) as parent:
             with regular_file(parent, path.name):

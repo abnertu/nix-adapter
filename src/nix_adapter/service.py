@@ -68,9 +68,7 @@ class BaseServiceAdapter(BaseAdapter):
         os.replace(temporary, path)
         return True
 
-    def ensure_metadata(
-        self, path: Path, user: str, group: str, mode: int
-    ) -> None:
+    def ensure_metadata(self, path: Path, user: str, group: str, mode: int) -> None:
         """Ensure file or directory ownership and permissions."""
         info = path.stat()
         desired = f"{user}:{group}"

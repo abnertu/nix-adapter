@@ -48,12 +48,16 @@ class IoTests(unittest.TestCase):
     def test_atomic_write_and_read(self):
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory) / "test.txt"
-            written = atomic_write(target, "hello", mode=0o644, uid=os.getuid(), gid=os.getgid())
+            written = atomic_write(
+                target, "hello", mode=0o644, uid=os.getuid(), gid=os.getgid()
+            )
             self.assertTrue(written)
             self.assertEqual(read_managed(target), "hello")
 
             # Same content returns False
-            written_again = atomic_write(target, "hello", mode=0o644, uid=os.getuid(), gid=os.getgid())
+            written_again = atomic_write(
+                target, "hello", mode=0o644, uid=os.getuid(), gid=os.getgid()
+            )
             self.assertFalse(written_again)
 
             # Removal

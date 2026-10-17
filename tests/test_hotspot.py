@@ -59,7 +59,9 @@ class HotspotTests(unittest.TestCase):
         self.assertEqual(found, uuid)
 
         # Missing connection
-        mock_runner.run.return_value.stdout = "22222222-2222-2222-2222-222222222222:Other\n"
+        mock_runner.run.return_value.stdout = (
+            "22222222-2222-2222-2222-222222222222:Other\n"
+        )
         with self.assertRaises(Conflict):
             find_hotspot_connection_uuid("MyAP", runner=mock_runner)
 
@@ -74,7 +76,9 @@ class HotspotTests(unittest.TestCase):
             # iw
             SimpleNamespace(stdout="\tssid MyAP\n\tchannel 36 (5180 MHz)\n"),
             # ip
-            SimpleNamespace(stdout='[{"addr_info":[{"local":"192.0.2.1","prefixlen":24}]}]'),
+            SimpleNamespace(
+                stdout='[{"addr_info":[{"local":"192.0.2.1","prefixlen":24}]}]'
+            ),
         ]
         self.assertTrue(
             is_hotspot_active("wlan0", "MyAP", 36, "192.0.2.1/24", runner=mock_runner)
@@ -103,7 +107,9 @@ class HotspotTests(unittest.TestCase):
 
         def fake_run(*args, **kwargs):
             if args[:4] == ("ip", "-j", "link", "show"):
-                return SimpleNamespace(stdout=json.dumps([{"ifname": "wlan0"}, {"ifname": "eth0"}]))
+                return SimpleNamespace(
+                    stdout=json.dumps([{"ifname": "wlan0"}, {"ifname": "eth0"}])
+                )
             if "UUID,NAME" in args:
                 return SimpleNamespace(stdout=f"{uuid}:MyAP\n")
             if "GENERAL.CON-UUID" in args:
@@ -141,7 +147,9 @@ class HotspotTests(unittest.TestCase):
 
         def fake_run(*args, **kwargs):
             if args[:4] == ("ip", "-j", "link", "show"):
-                return SimpleNamespace(stdout=json.dumps([{"ifname": "wlan0"}, {"ifname": "eth0"}]))
+                return SimpleNamespace(
+                    stdout=json.dumps([{"ifname": "wlan0"}, {"ifname": "eth0"}])
+                )
             if "UUID,NAME" in args:
                 return SimpleNamespace(stdout=f"{uuid}:MyAP\n")
             if "GENERAL.CON-UUID" in args:
@@ -151,7 +159,9 @@ class HotspotTests(unittest.TestCase):
             if args[0] == "iw":
                 return SimpleNamespace(stdout="\tssid MyAP\n\tchannel 36 (5180 MHz)\n")
             if args[:4] == ("ip", "-j", "-4", "address"):
-                return SimpleNamespace(stdout='[{"addr_info":[{"local":"192.0.2.1","prefixlen":24}]}]')
+                return SimpleNamespace(
+                    stdout='[{"addr_info":[{"local":"192.0.2.1","prefixlen":24}]}]'
+                )
             if "-g" in args:
                 prop = args[args.index("-g") + 1]
                 values = {

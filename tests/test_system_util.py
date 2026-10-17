@@ -48,7 +48,9 @@ class SystemUtilTests(unittest.TestCase):
 
             # Overlapping allocation fails
             with self.assertRaises(Conflict):
-                ensure_subordinate_range(path, "charlie", {"start": 150000, "count": 10000})
+                ensure_subordinate_range(
+                    path, "charlie", {"start": 150000, "count": 10000}
+                )
 
             # Update existing user
             ensure_subordinate_range(path, "alice", {"start": 100000, "count": 32768})
@@ -79,7 +81,9 @@ class SystemUtilTests(unittest.TestCase):
         self.assertEqual(get_hostname(runner=mock_runner), "myhost")
 
         set_hostname("newhost", runner=mock_runner)
-        mock_runner.run.assert_called_with("hostnamectl", "--static", "set-hostname", "newhost")
+        mock_runner.run.assert_called_with(
+            "hostnamectl", "--static", "set-hostname", "newhost"
+        )
 
     def test_is_ntp_synchronized(self):
         mock_runner = MagicMock()

@@ -205,7 +205,18 @@ def hotspot_firewall_rules(
         )
     rules.append(
         (
-            ["route", "allow", "in", "on", interface, "out", "on", uplink, "from", subnet],
+            [
+                "route",
+                "allow",
+                "in",
+                "on",
+                interface,
+                "out",
+                "on",
+                uplink,
+                "from",
+                subnet,
+            ],
             [
                 "ufw-user-forward",
                 "-i",
@@ -395,9 +406,7 @@ class UfwBackend(FirewallBackend):
             pending
             or not self.kernel_policy()
             or any(
-                not self.kernel_rule(rule, v6)
-                for rule in rules
-                for v6 in (False, True)
+                not self.kernel_rule(rule, v6) for rule in rules for v6 in (False, True)
             )
         ):
             f.mark("firewall")
@@ -410,7 +419,11 @@ class UfwBackend(FirewallBackend):
 
         final = self.snapshot()
         expected_rules = {
-            (format_port_range(rule["fromPort"], rule.get("toPort")), rule["protocol"], v6)
+            (
+                format_port_range(rule["fromPort"], rule.get("toPort")),
+                rule["protocol"],
+                v6,
+            )
             for rule in rules
             for v6 in (False, True)
         }
@@ -422,9 +435,7 @@ class UfwBackend(FirewallBackend):
             or final["profiles"] != profiles
             or not expected_rules <= final["rules"]
             or any(
-                not self.kernel_rule(rule, v6)
-                for rule in rules
-                for v6 in (False, True)
+                not self.kernel_rule(rule, v6) for rule in rules for v6 in (False, True)
             )
         ):
             f.mark("firewall")

@@ -106,26 +106,40 @@ def ini(text: str) -> dict[tuple[str, str], str]:
 
 
 class Files:
-    def __init__(self, root: Path | str = Path("/"), identity: tuple[int, int] = (0, 0)):
+    def __init__(
+        self, root: Path | str = Path("/"), identity: tuple[int, int] = (0, 0)
+    ):
         self.root = Path(root)
         self.identity = identity
+
+    def system_name(self, path: Path) -> str:
+        """The host path that a root-relative path stands for, for diagnostics."""
+        return "/" + str(path.relative_to(self.root))
 
     def path(self, name: str, symlink_leaf: bool = False) -> Path:
         relative = Path(name)
         if not relative.is_absolute() or ".." in relative.parts:
-            raise Conflict("invalid private system path")
+            raise Conflict(f"invalid private system path: {name}")
         path = self.root / str(relative).lstrip("/")
         for parent in reversed([path, *path.parents]):
             if parent == self.root or not parent.is_relative_to(self.root):
                 continue
             if parent.is_symlink() and not (parent == path and symlink_leaf):
-                raise Conflict("symlink in managed system path")
+                raise Conflict(
+                    f"symlink in managed system path: {self.system_name(parent)}"
+                )
             if parent != path and parent.exists():
                 info = parent.stat()
                 if not stat.S_ISDIR(info.st_mode):
-                    raise Conflict("non-directory in managed system path")
+                    raise Conflict(
+                        f"non-directory in managed system path: {self.system_name(parent)}"
+                    )
                 if info.st_uid != self.identity[0] or info.st_mode & 0o022:
-                    raise Conflict("unsafe ownership or permissions in system path")
+                    raise Conflict(
+                        "unsafe ownership or permissions in system path: "
+                        f"{self.system_name(parent)} (owner {info.st_uid}, "
+                        f"mode {stat.S_IMODE(info.st_mode):04o})"
+                    )
         return path
 
     def read(self, name: str) -> str:
@@ -133,11 +147,11 @@ class Files:
         if not path.exists():
             return ""
         if not path.is_file():
-            raise Conflict("managed configuration is not a regular file")
+            raise Conflict(f"managed configuration is not a regular file: {name}")
         try:
             return path.read_text()
         except UnicodeError:
-            raise Conflict("configuration is not valid text") from None
+            raise Conflict(f"configuration is not valid text: {name}") from None
 
     def matches(self, name: str, text: str, mode: int = 0o644) -> bool:
         old = self.read(name)

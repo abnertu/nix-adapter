@@ -17,7 +17,7 @@ from nix_adapter import (
 
 class FilesParsingTests(unittest.TestCase):
     def test_assignments_valid(self):
-        text = "FOO=bar\n# comment\nBAZ=\"hello world\"\n"
+        text = 'FOO=bar\n# comment\nBAZ="hello world"\n'
         self.assertEqual(assignments(text), {"FOO": "bar", "BAZ": "hello world"})
 
     def test_assignments_invalid(self):
@@ -71,6 +71,29 @@ class FilesOperationsTests(unittest.TestCase):
         self.assertTrue(self.files.pending(action))
         self.files.clear(action)
         self.assertFalse(self.files.pending(action))
+
+
+class FilesDiagnosticsTests(unittest.TestCase):
+    def test_path_errors_name_the_offending_system_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            files = Files(root, (os.getuid(), os.getgid()))
+            (root / "etc").mkdir()
+            (root / "etc").chmod(0o777)
+            with self.assertRaisesRegex(
+                Conflict, r"system path: /etc \(owner \d+, mode 0777\)"
+            ):
+                files.path("/etc/demo.conf")
+            (root / "etc").chmod(0o755)
+            (root / "etc/link").symlink_to(root)
+            with self.assertRaisesRegex(
+                Conflict, "symlink in managed system path: /etc/link"
+            ):
+                files.path("/etc/link/demo.conf")
+            with self.assertRaisesRegex(
+                Conflict, "invalid private system path: relative"
+            ):
+                files.path("relative")
 
 
 if __name__ == "__main__":

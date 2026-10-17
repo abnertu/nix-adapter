@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from .exceptions import Conflict
 from .files import Files
@@ -60,6 +60,39 @@ class BaseAdapter:
     def require_unit(self, name: str) -> dict[str, str]:
         """Alias for ready_unit."""
         return self.ready_unit(name)
+
+    def converge_unit(
+        self,
+        name: str,
+        *,
+        restart: bool = False,
+        before_change: Callable[[], None] | None = None,
+    ) -> None:
+        """Keep a loaded unit enabled and active; restart it when asked.
+
+        `before_change` runs before each mutation, so callers can record a
+        pending marker. The unit must end enabled and active, or this fails.
+        """
+        state = self.ready_unit(name)
+        if state.get("UnitFileState") != "enabled":
+            if before_change is not None:
+                before_change()
+            self.systemd.enable(name)
+            self.actions += 1
+        if state.get("ActiveState") != "active" or restart:
+            if before_change is not None:
+                before_change()
+            if restart:
+                self.systemd.restart(name)
+            else:
+                self.systemd.start(name)
+            self.actions += 1
+        state = self.ready_unit(name)
+        if (
+            state.get("ActiveState") != "active"
+            or state.get("UnitFileState") != "enabled"
+        ):
+            raise Conflict(f"required unit {name} did not become enabled and active")
 
     def path_str(self, key: str, default: str | None = None) -> str:
         """Resolve a declared path string, checking paths dictionary or direct keys."""

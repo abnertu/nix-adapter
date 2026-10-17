@@ -10,7 +10,9 @@ from nix_adapter import Conflict, Native
 
 
 class NativeTests(unittest.TestCase):
-    def result(self, code: int = 0, stdout: str = "", stderr: str = "") -> subprocess.CompletedProcess[str]:
+    def result(
+        self, code: int = 0, stdout: str = "", stderr: str = ""
+    ) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(["command"], code, stdout, stderr)
 
     @mock.patch("subprocess.run")

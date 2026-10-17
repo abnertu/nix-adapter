@@ -117,7 +117,10 @@ To                         Action      From
     def test_ufw_backend_snapshot_and_preflight(self):
         mock_runner = MagicMock()
         mock_runner.unit.side_effect = lambda name: {
-            "nftables.service": {"ActiveState": "inactive", "UnitFileState": "disabled"},
+            "nftables.service": {
+                "ActiveState": "inactive",
+                "UnitFileState": "disabled",
+            },
             "ufw.service": {
                 "LoadState": "loaded",
                 "ActiveState": "active",

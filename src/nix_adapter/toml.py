@@ -41,7 +41,9 @@ def _dump_value(val: Any) -> str:
 
 
 def _is_table_array(val: Any) -> bool:
-    return isinstance(val, list) and len(val) > 0 and all(isinstance(x, dict) for x in val)
+    return (
+        isinstance(val, list) and len(val) > 0 and all(isinstance(x, dict) for x in val)
+    )
 
 
 def _dump_table(data: dict[str, Any], path: list[str]) -> list[str]:

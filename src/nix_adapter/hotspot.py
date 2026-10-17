@@ -23,7 +23,9 @@ def validate_hotspot_address(address_str: str) -> ipaddress.IPv4Interface:
             raise ValueError
         return address
     except ValueError:
-        raise Conflict("hotspot requires a usable IPv4 host address and subnet") from None
+        raise Conflict(
+            "hotspot requires a usable IPv4 host address and subnet"
+        ) from None
 
 
 def hotspot_properties(desired: dict[str, Any]) -> dict[str, str]:
@@ -54,12 +56,7 @@ def is_hotspot_active(
     wireless = r.run("iw", "dev", interface, "info").stdout
     c_match = re.search(r"^\s*channel (\d+) ", wireless, re.M)
     s_match = re.search(r"^\s*ssid (.*)$", wireless, re.M)
-    if (
-        not c_match
-        or int(c_match[1]) != channel
-        or not s_match
-        or s_match[1] != ssid
-    ):
+    if not c_match or int(c_match[1]) != channel or not s_match or s_match[1] != ssid:
         return False
 
     data = json.loads(
@@ -67,8 +64,7 @@ def is_hotspot_active(
     )
     addr = ipaddress.IPv4Interface(address)
     return any(
-        a.get("local") == str(addr.ip)
-        and a.get("prefixlen") == addr.network.prefixlen
+        a.get("local") == str(addr.ip) and a.get("prefixlen") == addr.network.prefixlen
         for link in data
         for a in link.get("addr_info", [])
     )
@@ -116,7 +112,10 @@ def check_hotspot_prerequisites(
         raise Conflict("invalid native link inventory")
 
     available = {link["ifname"] for link in links}
-    for role, name in (("wireless", desired["interface"]), ("uplink", desired["uplink"])):
+    for role, name in (
+        ("wireless", desired["interface"]),
+        ("uplink", desired["uplink"]),
+    ):
         if name not in available:
             raise Conflict(f"declared hotspot {role} interface is missing: {name}")
 

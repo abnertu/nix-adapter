@@ -21,7 +21,9 @@ class SystemdTests(unittest.TestCase):
         self.assertEqual(props["LoadState"], "loaded")
         self.assertEqual(props["ActiveState"], "active")
         self.assertEqual(props["UnitFileState"], "enabled")
-        self.runner.run.assert_called_with("systemctl", "show", "caddy.service", "--property=LoadState,ActiveState")
+        self.runner.run.assert_called_with(
+            "systemctl", "show", "caddy.service", "--property=LoadState,ActiveState"
+        )
 
     def test_ready_unit_raises_on_masked(self):
         res = MagicMock()
@@ -43,7 +45,9 @@ class SystemdTests(unittest.TestCase):
     def test_user_mode(self):
         user_sd = Systemd(runner=self.runner, user=True)
         user_sd.restart("user-task.service")
-        self.runner.run.assert_called_with("systemctl", "--user", "restart", "user-task.service")
+        self.runner.run.assert_called_with(
+            "systemctl", "--user", "restart", "user-task.service"
+        )
 
 
 if __name__ == "__main__":

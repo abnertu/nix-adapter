@@ -48,7 +48,9 @@ def get_hostname(runner: Native | None = None, kind: str = "--static") -> str:
     return r.run("hostnamectl", kind).stdout.strip()
 
 
-def set_hostname(hostname: str, runner: Native | None = None, kind: str = "--static") -> None:
+def set_hostname(
+    hostname: str, runner: Native | None = None, kind: str = "--static"
+) -> None:
     """Set system hostname using hostnamectl."""
     r = runner or Native()
     r.run("hostnamectl", kind, "set-hostname", hostname)
@@ -133,9 +135,7 @@ def ensure_subordinate_range(
             )
 
     if len(user_indices) > 1:
-        raise Conflict(
-            f"multiple subordinate ID allocations exist for {user} in {p}"
-        )
+        raise Conflict(f"multiple subordinate ID allocations exist for {user} in {p}")
     desired_line = f"{user}:{desired['start']}:{desired['count']}"
     if user_indices:
         lines[user_indices[0]] = desired_line

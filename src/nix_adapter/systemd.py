@@ -19,12 +19,16 @@ class Systemd:
         cmd.extend(args)
         return cmd
 
-    def show(self, unit: str, properties: Sequence[str] | None = None) -> dict[str, str]:
+    def show(
+        self, unit: str, properties: Sequence[str] | None = None
+    ) -> dict[str, str]:
         args = ["show", unit]
         if properties:
             args.append(f"--property={','.join(properties)}")
         res = self.runner.run(*self._cmd(*args))
-        return dict(line.split("=", 1) for line in res.stdout.splitlines() if "=" in line)
+        return dict(
+            line.split("=", 1) for line in res.stdout.splitlines() if "=" in line
+        )
 
     def ready_unit(self, unit: str) -> dict[str, str]:
         state = self.show(
