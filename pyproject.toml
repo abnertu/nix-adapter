@@ -7,7 +7,7 @@ name = "nix_adapter"
 version = "0.5.0"
 description = "Cross-platform native reconciliation adapter and CLI primitives for Nix deployments"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.13"
 dependencies = [
     "rich",
 ]

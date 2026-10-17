@@ -6,7 +6,7 @@ Python primitives for adapters that reconcile live host state against declaratio
 
 | Module | Provides |
 | --- | --- |
-| `base` | `BaseAdapter`: desired state, file and command access, systemd unit convergence, `plan_file`/`plan_unit` |
+| `base` | `BaseAdapter[M]`: a manifest of type M, file and command access, systemd unit convergence, `plan_file`/`plan_unit` |
 | `service` | `BaseServiceAdapter`: one service with its account and unit files |
 | `files` | `Files`: owned paths, atomic writes, pending markers, drop-ins, config parsers |
 | `io` | Low-level atomic and symlink-safe file operations |
@@ -18,6 +18,7 @@ Python primitives for adapters that reconcile live host state against declaratio
 | `progress` | `Progress`: the task display shared with Bash callers (`progress-renderer`) |
 | `lock` | `operation_lock`: an exclusive lock around one operation |
 | `testing` | `FakeNative`, `FakeProcess` for adapter tests |
+| `manifest` | `validate`: check a manifest's keys against the adapter's `TypedDict` |
 | `toml` | `parse_toml`, `dump_toml` |
 
 Errors that need an operator decision raise `Conflict`; an optional feature that was never prepared raises `NotReady`.

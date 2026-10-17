@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, cast
 
@@ -13,12 +13,12 @@ from .plan import Change
 from .systemd import Systemd
 
 
-class BaseAdapter:
-    """Unified base adapter for system settings, services, and multi-service reconciliation."""
+class BaseAdapter[M: Mapping[str, Any] = dict[str, Any]]:
+    """Base for adapters that converge native state toward a manifest of type M."""
 
     def __init__(
         self,
-        desired: dict[str, Any],
+        desired: M,
         root: Path | str = Path("/"),
         runner: Native | None = None,
         files: Files | None = None,

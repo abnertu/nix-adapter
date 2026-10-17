@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import stat
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -13,12 +14,12 @@ from .files import Files
 from .native import Native
 
 
-class BaseServiceAdapter(BaseAdapter):
+class BaseServiceAdapter[M: Mapping[str, Any] = dict[str, Any]](BaseAdapter[M]):
     """Adapter specialized for single-service lifecycle, account, and unit file management."""
 
     def __init__(
         self,
-        desired: dict[str, Any],
+        desired: M,
         root: Path | str = Path("/"),
         runner: Native | None = None,
         files: Files | None = None,

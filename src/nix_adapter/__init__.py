@@ -12,6 +12,7 @@ from .io import (
     remove_managed_file,
 )
 from .lock import operation_lock
+from .manifest import validate
 from .native import Native
 from .plan import Change, render
 from .progress import Progress, Task
@@ -51,4 +52,5 @@ __all__ = [
     "render",
     "replace_keys",
     "run_adapter_cli",
+    "validate",
 ]
