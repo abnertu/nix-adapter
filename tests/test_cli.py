@@ -1,5 +1,7 @@
 """Unit tests for nix_adapter.cli."""
 
+import contextlib
+import io
 import json
 import sys
 import tempfile
@@ -8,6 +10,7 @@ from pathlib import Path
 
 from nix_adapter.cli import run_adapter_cli
 from nix_adapter.exceptions import Conflict, NotReady
+from nix_adapter.plan import Change
 
 
 class DummyAdapter:
@@ -54,6 +57,58 @@ class CliTests(unittest.TestCase):
             self.assertEqual(run_adapter_cli(Purging, require_root=False), 0)
             self.assertTrue(Purging.purged)
             with self.assertRaisesRegex(Conflict, "does not support purge"):
+                run_adapter_cli(DummyAdapter, require_root=False)
+
+    def run_plan(self, desired, *flags):
+        class Planning(DummyAdapter):
+            def plan(self):
+                self.preflight()
+                return [Change("=", "kept"), Change("~", "changed")] + (
+                    [Change("!", "blocked")] if self.desired.get("blocked") else []
+                )
+
+        with tempfile.TemporaryDirectory() as d:
+            manifest = Path(d) / "manifest.json"
+            manifest.write_text(json.dumps(desired))
+            sys.argv = ["adapter.py", str(manifest), "plan", *flags]
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                code = run_adapter_cli(Planning, "Fixture", require_root=False)
+            return code, output.getvalue()
+
+    def test_plan_prints_changes_and_fails_on_conflicts(self):
+        code, output = self.run_plan({})
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            output.splitlines(), ["= kept", "~ changed", "Fixture plan: 1 changes."]
+        )
+        code, output = self.run_plan({"blocked": True})
+        self.assertEqual(code, 1)
+        self.assertIn("! blocked", output)
+        code, output = self.run_plan({"conflict": True})
+        self.assertEqual(code, 1)
+        self.assertIn("! conflict occurred", output)
+        code, output = self.run_plan({}, "--color")
+        self.assertIn("\033[33m~ changed\033[0m", output)
+
+    def test_extra_phases_run_only_when_declared_and_implemented(self):
+        class Finishing(DummyAdapter):
+            finished = False
+
+            def finish(self):
+                Finishing.finished = True
+
+        with tempfile.TemporaryDirectory() as d:
+            manifest = Path(d) / "manifest.json"
+            manifest.write_text(json.dumps({}))
+            sys.argv = ["adapter.py", str(manifest), "finish"]
+            with self.assertRaises(Conflict):
+                run_adapter_cli(Finishing, require_root=False)
+            code = run_adapter_cli(Finishing, require_root=False, phases=("finish",))
+            self.assertEqual(code, 0)
+            self.assertTrue(Finishing.finished)
+            sys.argv = ["adapter.py", str(manifest), "converge", "--bogus"]
+            with self.assertRaises(Conflict):
                 run_adapter_cli(DummyAdapter, require_root=False)
 
     def test_run_adapter_cli_not_ready(self):

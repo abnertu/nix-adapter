@@ -13,6 +13,7 @@ from .io import (
 )
 from .lock import operation_lock
 from .native import Native
+from .plan import Change, render
 from .progress import Progress, Task
 from .service import BaseServiceAdapter
 from .system import ensure_subordinate_range
@@ -20,11 +21,12 @@ from .systemd import Systemd
 from .testing import FakeNative, FakeProcess
 from .toml import dump_toml, parse_toml
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 __all__ = [
     "BaseAdapter",
     "BaseServiceAdapter",
+    "Change",
     "Conflict",
     "FakeNative",
     "FakeProcess",
@@ -46,6 +48,7 @@ __all__ = [
     "read_managed",
     "regular_file",
     "remove_managed_file",
+    "render",
     "replace_keys",
     "run_adapter_cli",
 ]

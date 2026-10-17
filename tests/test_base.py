@@ -1,9 +1,10 @@
 """BaseAdapter unit convergence against a stateful fake systemd."""
 
+import os
 import tempfile
 import unittest
 
-from nix_adapter import BaseAdapter, Conflict, FakeNative, FakeProcess
+from nix_adapter import BaseAdapter, Change, Conflict, FakeNative, FakeProcess, Files
 
 
 class FakeSystemd(FakeNative):
@@ -64,6 +65,46 @@ class ConvergeUnitTests(unittest.TestCase):
         with self.assertRaises(Conflict):
             self.converge()
         self.assertEqual(self.marks, [])
+
+
+class PlanTests(unittest.TestCase):
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.native = FakeSystemd()
+        files = Files(temp.name, (os.getuid(), os.getgid()))
+        self.adapter = BaseAdapter({}, root=temp.name, runner=self.native, files=files)
+
+    def test_plan_unit_matches_what_converge_unit_would_do(self):
+        self.assertEqual(
+            self.adapter.plan_unit("fixture.service"),
+            [
+                Change("~", "enable fixture.service"),
+                Change("~", "start fixture.service"),
+            ],
+        )
+        self.adapter.converge_unit("fixture.service")
+        self.native.calls.clear()
+        self.assertEqual(
+            self.adapter.plan_unit("fixture.service"), [Change("=", "fixture.service")]
+        )
+        self.assertEqual([call[1] for call in self.native.calls], ["show"])
+
+    def test_plan_file_reports_missing_differing_and_matching(self):
+        files = self.adapter.files
+        self.assertEqual(self.adapter.plan_file("/etc/x.conf", "a\n").kind, "+")
+        files.write("/etc/x.conf", "old\n")
+        self.assertEqual(
+            self.adapter.plan_file("/etc/x.conf", "a\n"),
+            Change("~", "/etc/x.conf (content differs)"),
+        )
+        files.write("/etc/x.conf", "a\n")
+        self.assertEqual(self.adapter.plan_file("/etc/x.conf", "a\n").kind, "=")
+        files.path("/etc/x.conf").chmod(0o600)
+        self.assertEqual(
+            self.adapter.plan_file("/etc/x.conf", "a\n"),
+            Change("~", "/etc/x.conf (mode or owner differs)"),
+        )
 
 
 if __name__ == "__main__":

@@ -6,14 +6,15 @@ Python primitives for adapters that reconcile live host state against declaratio
 
 | Module | Provides |
 | --- | --- |
-| `base` | `BaseAdapter`: desired state, file and command access, systemd unit convergence |
+| `base` | `BaseAdapter`: desired state, file and command access, systemd unit convergence, `plan_file`/`plan_unit` |
 | `service` | `BaseServiceAdapter`: one service with its account and unit files |
 | `files` | `Files`: owned paths, atomic writes, pending markers, drop-ins, config parsers |
 | `io` | Low-level atomic and symlink-safe file operations |
 | `native` | `Native`: command runner that keeps stdout, stderr and timeout output, with redaction |
 | `systemd` | `Systemd`: unit inspection and control |
 | `system` | Hostname, timezone, NTP, discard support, sub-UID/GID ranges |
-| `cli` | `run_adapter_cli`: the `preflight` / `converge` / `purge` entry point |
+| `cli` | `run_adapter_cli`: the `preflight` / `plan` / `converge` / `purge` entry point, plus adapter-specific phases |
+| `plan` | `Change` and `render`: what converge would change, with `= ~ + ! -` markers |
 | `progress` | `Progress`: the task display shared with Bash callers (`progress-renderer`) |
 | `lock` | `operation_lock`: an exclusive lock around one operation |
 | `testing` | `FakeNative`, `FakeProcess` for adapter tests |

@@ -9,6 +9,7 @@ from typing import Any, cast
 from .exceptions import Conflict
 from .files import Files
 from .native import Native
+from .plan import Change
 from .systemd import Systemd
 
 
@@ -91,6 +92,32 @@ class BaseAdapter:
             or state.get("UnitFileState") != "enabled"
         ):
             raise Conflict(f"required unit {name} did not become enabled and active")
+
+    def plan(self) -> list[Change]:
+        """What converge would change; adapters override this."""
+        return []
+
+    def plan_file(self, name: str, text: str) -> Change:
+        """Compare a managed file with its declared content, ownership and mode."""
+        if not self.files.path(name).exists():
+            return Change("+", name)
+        if self.files.read(name) != text:
+            return Change("~", f"{name} (content differs)")
+        if not self.files.matches(name, text):
+            return Change("~", f"{name} (mode or owner differs)")
+        return Change("=", name)
+
+    def plan_unit(self, name: str) -> list[Change]:
+        """Judge a unit as converge_unit does, so the plan matches the deployment."""
+        state = self.ready_unit(name)
+        enabled = state.get("UnitFileState") == "enabled"
+        active = state.get("ActiveState") == "active"
+        changes: list[Change] = []
+        if not enabled:
+            changes.append(Change("~", f"enable {name}"))
+        if not active:
+            changes.append(Change("~", f"start {name}"))
+        return changes or [Change("=", name)]
 
     def path_str(self, key: str, default: str | None = None) -> str:
         """Resolve a declared path string, checking paths dictionary or direct keys."""
