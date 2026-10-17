@@ -24,14 +24,16 @@ def run_adapter_cli(
     allow_skip: bool = False,
     require_root: bool = True,
 ) -> int:
-    """Run an adapter lifecycle phase (preflight or converge) from argv.
+    """Run an adapter lifecycle phase (preflight, converge or purge) from argv.
+
+    purge is accepted only from adapters that implement it.
 
     Handles CLI arguments, verbose flag, root checks, and translates exceptions
     to standard exit codes.
     """
     if (
         len(sys.argv) not in (3, 4)
-        or sys.argv[2] not in ("preflight", "converge")
+        or sys.argv[2] not in ("preflight", "converge", "purge")
         or (len(sys.argv) == 4 and sys.argv[3] != "--verbose")
         or (require_root and os.geteuid() != 0)
     ):
@@ -44,12 +46,16 @@ def run_adapter_cli(
     desired = json.loads(manifest_path.read_text())
     adapter = adapter_factory(desired)
     phase = sys.argv[2]
+    if phase == "purge" and not hasattr(adapter, "purge"):
+        raise Conflict(f"{name} adapter does not support purge")
 
     try:
         if phase == "preflight":
             result = adapter.preflight()
             if allow_skip and result is False:
                 return OPTIONAL_NOT_READY
+        elif phase == "purge":
+            adapter.purge()
         else:
             if hasattr(adapter, "converge"):
                 adapter.converge()

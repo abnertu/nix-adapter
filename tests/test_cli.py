@@ -40,6 +40,22 @@ class CliTests(unittest.TestCase):
             code = run_adapter_cli(DummyAdapter, require_root=False)
             self.assertEqual(code, 0)
 
+    def test_purge_runs_only_on_adapters_that_implement_it(self):
+        class Purging(DummyAdapter):
+            purged = False
+
+            def purge(self):
+                Purging.purged = True
+
+        with tempfile.TemporaryDirectory() as d:
+            manifest = Path(d) / "manifest.json"
+            manifest.write_text(json.dumps({}))
+            sys.argv = ["adapter.py", str(manifest), "purge"]
+            self.assertEqual(run_adapter_cli(Purging, require_root=False), 0)
+            self.assertTrue(Purging.purged)
+            with self.assertRaisesRegex(Conflict, "does not support purge"):
+                run_adapter_cli(DummyAdapter, require_root=False)
+
     def test_run_adapter_cli_not_ready(self):
         with tempfile.TemporaryDirectory() as d:
             manifest = Path(d) / "manifest.json"
