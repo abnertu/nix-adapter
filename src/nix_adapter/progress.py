@@ -4,15 +4,18 @@ from __future__ import annotations
 
 import argparse
 import base64
-from contextlib import contextmanager
-from dataclasses import dataclass, field
+import contextlib
 import json
 import os
 import signal
 import sys
 import time
-from typing import IO, Iterator
 import unicodedata
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
+from dataclasses import dataclass, field
+from types import FrameType, TracebackType
+from typing import IO, NoReturn
 
 from rich.console import Console, RenderableType
 from rich.live import Live
@@ -36,7 +39,7 @@ class Task:
     completed: int = 0
     started: float = field(default_factory=time.monotonic)
     _finished: bool = False
-    _spinner: Spinner = field(default_factory=lambda: Spinner("dots", style="cyan"))
+    spinner: Spinner = field(default_factory=lambda: Spinner("dots", style="cyan"))
 
     def update(self, completed: int, total: int | None = None) -> None:
         if self._finished:
@@ -46,12 +49,12 @@ class Task:
         self.completed = max(0, completed)
         if self.total is not None:
             self.completed = min(self.completed, self.total)
-        self._owner._refresh()
+        self._owner.refresh()
 
     def finish(self, status: str = "done") -> None:
         if not self._finished:
             self._finished = True
-            self._owner._finish(self, status)
+            self._owner.finish_task(self, status)
 
     def external_output(self):
         return self._owner.external_output()
@@ -99,10 +102,15 @@ class Progress:
     def __enter__(self) -> Progress:
         return self
 
-    def __exit__(self, _kind, _error, _traceback) -> None:
+    def __exit__(
+        self,
+        _kind: type[BaseException] | None,
+        _error: BaseException | None,
+        _traceback: TracebackType | None,
+    ) -> None:
         self.close()
 
-    def _safe(self, operation) -> None:
+    def _safe(self, operation: Callable[[], object]) -> None:
         if self._disabled:
             return
         try:
@@ -113,18 +121,16 @@ class Progress:
             # writes. No exception details or task payloads are diagnostic data.
             live, self._live = self._live, None
             if live is not None:
-                try:
+                with contextlib.suppress(Exception):
                     live.stop()
-                except Exception:
-                    pass
 
-    def _active(self) -> Task | None:
+    def active(self) -> Task | None:
         return self._tasks[-1] if self._tasks else None
 
     def _row(
         self, task: Task | None = None, status: str | None = None
     ) -> RenderableType:
-        current = task or self._active()
+        current = task or self.active()
         if current is None:
             return Text("")
         styles = {"done": "green", "skip": "yellow", "failed": "red"}
@@ -154,7 +160,7 @@ class Progress:
                 style=styles[status],
             )
         else:
-            icon = current._spinner
+            icon = current.spinner
         cells: list[RenderableType] = [icon, label]
         if status is None and current.total is not None and width >= 60:
             cells.extend(
@@ -178,7 +184,7 @@ class Progress:
         if live is not None:
             live.stop()
 
-    def _refresh(self) -> None:
+    def refresh(self) -> None:
         def render() -> None:
             if not self._animated or self._suspended or self._closed or not self._tasks:
                 self._stop()
@@ -208,15 +214,15 @@ class Progress:
     def start(self, label: str, total: int | None = None) -> Task:
         task = Task(self, _clean(label), max(0, total) if total is not None else None)
         if not self._unicode:
-            task._spinner = Spinner("line", style="cyan")
+            task.spinner = Spinner("line", style="cyan")
         self._tasks.append(task)
         if not self._animated:
             self._safe(lambda: self._plain(task, "start"))
-        self._refresh()
+        self.refresh()
         return task
 
     @contextmanager
-    def task(self, label: str, total: int | None = None) -> Iterator[Task]:
+    def task(self, label: str, total: int | None = None) -> Generator[Task]:
         task = self.start(label, total)
         try:
             yield task
@@ -226,7 +232,7 @@ class Progress:
         else:
             task.finish("done")
 
-    def _finish(self, task: Task, status: str) -> None:
+    def finish_task(self, task: Task, status: str) -> None:
         status = status if status in {"done", "skip", "failed"} else "failed"
         self._safe(self._stop)
         if task in self._tasks:
@@ -235,14 +241,14 @@ class Progress:
             self._safe(lambda: self._console.print(self._row(task, status)))
         else:
             self._safe(lambda: self._plain(task, status))
-        self._refresh()
+        self.refresh()
 
     def update(self, completed: int, total: int | None = None) -> None:
-        if task := self._active():
+        if task := self.active():
             task.update(completed, total)
 
     def finish(self, status: str = "done") -> None:
-        if task := self._active():
+        if task := self.active():
             task.finish(status)
 
     def suspend(self) -> None:
@@ -251,7 +257,7 @@ class Progress:
 
     def resume(self) -> None:
         self._suspended = max(0, self._suspended - 1)
-        self._refresh()
+        self.refresh()
 
     @contextmanager
     def external_output(self):
@@ -271,7 +277,7 @@ class Progress:
 def _renderer_main(verbose: bool) -> int:
     ui = Progress(verbose=verbose)
 
-    def stop(_signal, _frame):
+    def stop(_signal: int, _frame: FrameType | None) -> NoReturn:
         raise SystemExit(0)
 
     signal.signal(signal.SIGTERM, stop)
@@ -285,7 +291,7 @@ def _renderer_main(verbose: bool) -> int:
                 identifier = event.get("id")
                 kind = event.get("event")
                 if kind == "start":
-                    if ui._active():
+                    if ui.active():
                         ui.finish("failed")
                     label = event.get("label", "")
                     if "label_b64" in event:

@@ -1,9 +1,9 @@
 """Unit tests for nix_adapter.io primitives."""
 
 import os
-from pathlib import Path
 import tempfile
 import unittest
+from pathlib import Path
 
 from nix_adapter.exceptions import Conflict
 from nix_adapter.io import (

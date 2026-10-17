@@ -1,18 +1,17 @@
-import json
 import fcntl
+import json
 import os
 import pty
 import re
+import shutil
 import signal
 import struct
 import subprocess
-import shutil
 import sys
 import tempfile
 import time
 import unittest
 from pathlib import Path
-
 
 ROOT = Path(__file__).parent
 RENDERER = [sys.executable, "-m", "nix_adapter.progress", "--renderer"]

@@ -1,9 +1,10 @@
 """TOML serialization and parsing utilities using standard library tomllib."""
 
 from __future__ import annotations
+
 import re
 import tomllib
-from typing import Any
+from typing import Any, cast
 
 
 def _format_key(key: str) -> str:
@@ -31,17 +32,22 @@ def _dump_value(val: Any) -> str:
         )
         return f'"{escaped}"'
     elif isinstance(val, list):
-        items = [_dump_value(x) for x in val]
+        items = [_dump_value(x) for x in cast("list[Any]", val)]
         return f"[{', '.join(items)}]"
     elif isinstance(val, dict):
-        items = [f"{_format_key(k)} = {_dump_value(v)}" for k, v in val.items()]
+        items = [
+            f"{_format_key(k)} = {_dump_value(v)}"
+            for k, v in cast("dict[str, Any]", val).items()
+        ]
         return f"{{{', '.join(items)}}}"
     raise TypeError(f"Unsupported TOML value type: {type(val)}")
 
 
 def _is_table_array(val: Any) -> bool:
     return (
-        isinstance(val, list) and len(val) > 0 and all(isinstance(x, dict) for x in val)
+        isinstance(val, list)
+        and len(cast("list[Any]", val)) > 0
+        and all(isinstance(x, dict) for x in cast("list[Any]", val))
     )
 
 
@@ -57,17 +63,17 @@ def _dump_table(data: dict[str, Any], path: list[str]) -> list[str]:
     # 2. Sub-tables
     for k, v in data.items():
         if isinstance(v, dict):
-            new_path = path + [k]
+            new_path = [*path, k]
             header = f"[{'.'.join(_format_key(p) for p in new_path)}]"
             if lines and lines[-1] != "":
                 lines.append("")
             lines.append(header)
-            lines.extend(_dump_table(v, new_path))
+            lines.extend(_dump_table(cast("dict[str, Any]", v), new_path))
 
     # 3. Array of tables
     for k, v in data.items():
         if _is_table_array(v):
-            new_path = path + [k]
+            new_path = [*path, k]
             header = f"[[{'.'.join(_format_key(p) for p in new_path)}]]"
             for item in v:
                 if lines and lines[-1] != "":

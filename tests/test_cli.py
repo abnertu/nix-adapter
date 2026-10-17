@@ -1,10 +1,10 @@
 """Unit tests for nix_adapter.cli."""
 
 import json
-from pathlib import Path
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 
 from nix_adapter.cli import run_adapter_cli
 from nix_adapter.exceptions import Conflict, NotReady

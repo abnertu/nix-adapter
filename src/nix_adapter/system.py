@@ -1,9 +1,11 @@
 """General Linux system administration and hardware inspection primitives."""
 
 from __future__ import annotations
+
 import json
 import os
 from pathlib import Path
+from typing import Any
 
 from .exceptions import Conflict
 from .native import Native
@@ -78,7 +80,7 @@ def check_discard_support(runner: Native | None = None) -> bool:
         ).stdout
     )
 
-    def walk(devices: list[dict], encrypted: bool = False) -> bool:
+    def walk(devices: list[dict[str, Any]], encrypted: bool = False) -> bool:
         suitable = False
         for device in devices:
             crypt = encrypted or device.get("type") == "crypt"

@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 import re
 import shlex
 import stat
 import tempfile
+from pathlib import Path
 
 from .exceptions import Conflict
 

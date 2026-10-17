@@ -1,6 +1,7 @@
 """Test utilities and mock classes for adapters."""
 
 from __future__ import annotations
+
 import subprocess
 from typing import Any
 

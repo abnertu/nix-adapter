@@ -1,9 +1,9 @@
 """Unit tests for Files and configuration parsing helpers."""
 
 import os
-from pathlib import Path
 import tempfile
 import unittest
+from pathlib import Path
 
 from nix_adapter import (
     Conflict,

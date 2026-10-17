@@ -1,7 +1,6 @@
 """Check the real Bash bridge with foreground I/O, traps, and process signals."""
 
 import os
-from pathlib import Path
 import pty
 import select
 import shlex
@@ -11,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 
 SH_PATH = Path(__file__).parent / "progress.sh"
 

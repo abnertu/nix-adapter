@@ -55,6 +55,7 @@
             nativeBuildInputs = [ pkgs.ruff ];
           } ''
             ruff check --no-cache ${./.}
+            ruff format --no-cache --check ${./.}
             touch "$out"
           '';
 

@@ -1,8 +1,8 @@
 """Unit tests for BaseServiceAdapter."""
 
-from pathlib import Path
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock
 
 from nix_adapter.exceptions import Conflict
@@ -88,6 +88,7 @@ class ServiceAdapterTests(unittest.TestCase):
 
     def test_base_adapter_contract(self):
         import os
+
         from nix_adapter.base import BaseAdapter
         from nix_adapter.files import Files
 

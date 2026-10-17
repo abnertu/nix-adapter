@@ -1,8 +1,10 @@
 """Base adapter class defining standard lifecycle and resource contracts."""
 
 from __future__ import annotations
+
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, cast
 
 from .exceptions import Conflict
 from .files import Files
@@ -92,10 +94,9 @@ class BaseAdapter:
 
     def path_str(self, key: str, default: str | None = None) -> str:
         """Resolve a declared path string, checking paths dictionary or direct keys."""
-        value = None
-        paths = self.desired.get("paths")
+        paths: object = self.desired.get("paths")
         if isinstance(paths, dict):
-            value = paths.get(key)
+            value = cast("dict[str, object]", paths).get(key)
         else:
             value = self.desired.get(key)
         if value is None and default is not None:

@@ -71,9 +71,8 @@ class SystemUtilTests(unittest.TestCase):
     def test_get_timezone_local_rtc_conflict(self):
         mock_runner = MagicMock()
         mock_runner.run.return_value.stdout = "Timezone=UTC\nLocalRTC=yes\n"
-        with tempfile.TemporaryDirectory() as d:
-            with self.assertRaises(Conflict):
-                get_timezone(runner=mock_runner, root=d)
+        with tempfile.TemporaryDirectory() as d, self.assertRaises(Conflict):
+            get_timezone(runner=mock_runner, root=d)
 
     def test_get_and_set_hostname(self):
         mock_runner = MagicMock()

@@ -1,9 +1,10 @@
 """Base service adapter for systemd service and identity reconciliation."""
 
 from __future__ import annotations
+
 import os
-from pathlib import Path
 import stat
+from pathlib import Path
 from typing import Any
 
 from .base import BaseAdapter
@@ -38,7 +39,7 @@ class BaseServiceAdapter(BaseAdapter):
     def write_unit(
         self,
         path: Path,
-        unit: str,
+        unit: object,
         receipt: Path,
         pending: Path,
         mode: int = 0o644,

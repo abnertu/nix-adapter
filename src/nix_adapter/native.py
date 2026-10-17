@@ -6,7 +6,7 @@ import os
 import shlex
 import subprocess
 import sys
-from typing import Iterable
+from collections.abc import Iterable
 
 from .exceptions import Conflict
 

@@ -1,12 +1,13 @@
 """Inter-process locking operations."""
 
 from __future__ import annotations
-from contextlib import contextmanager
+
 import fcntl
 import os
-from pathlib import Path
 import stat
 import time
+from contextlib import contextmanager
+from pathlib import Path
 
 from .exceptions import Conflict
 

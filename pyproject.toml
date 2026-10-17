@@ -21,11 +21,14 @@ Source = "https://github.com/gin31259461/nix-adapter"
 [tool.pyright]
 include = ["src", "tests"]
 typeCheckingMode = "standard"
+# The library is strict; tests drive it through fakes and stay standard.
+strict = ["src"]
 useLibraryCodeForTypes = true
 
 [tool.ruff]
 line-length = 88
 
 [tool.ruff.lint]
-select = ["F", "E", "W"]
+select = ["E", "W", "F", "I", "B", "UP", "SIM", "RUF"]
+# The formatter owns line length.
 ignore = ["E501"]

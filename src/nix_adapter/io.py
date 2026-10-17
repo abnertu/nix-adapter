@@ -1,12 +1,14 @@
 """High-security POSIX directory traversal and atomic file operations."""
 
 from __future__ import annotations
-from contextlib import contextmanager
+
+import contextlib
 import os
-from pathlib import Path
 import secrets
 import stat
-from typing import Callable
+from collections.abc import Callable
+from contextlib import contextmanager
+from pathlib import Path
 
 from .exceptions import Conflict
 
@@ -67,9 +69,11 @@ def regular_file(parent: int, name: str):
 
 def read_managed(path: Path) -> str:
     try:
-        with directory_fd(path.parent) as parent:
-            with regular_file(parent, path.name) as (stream, _):
-                return stream.read()
+        with (
+            directory_fd(path.parent) as parent,
+            regular_file(parent, path.name) as (stream, _),
+        ):
+            return stream.read()
     except FileNotFoundError:
         return ""
 
@@ -144,8 +148,6 @@ def atomic_write(
             os.replace(temporary, path.name, src_dir_fd=parent, dst_dir_fd=parent)
             os.fsync(parent)
         finally:
-            try:
+            with contextlib.suppress(FileNotFoundError):
                 os.unlink(temporary, dir_fd=parent)
-            except FileNotFoundError:
-                pass
     return True
