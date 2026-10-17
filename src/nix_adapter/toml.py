@@ -1,7 +1,6 @@
 """TOML serialization and parsing utilities using standard library tomllib."""
 
 from __future__ import annotations
-from pathlib import Path
 import re
 import tomllib
 from typing import Any
@@ -86,21 +85,8 @@ def dump_toml(data: dict[str, Any]) -> str:
     return res + "\n" if res and not res.endswith("\n") else res
 
 
-def write_toml(path: Path | str, data: dict[str, Any]) -> None:
-    """Serialize and write a dictionary to a TOML file."""
-    p = Path(path)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(dump_toml(data), encoding="utf-8")
-
-
 def parse_toml(content: str | bytes) -> dict[str, Any]:
     """Parse TOML content from a string or bytes."""
     if isinstance(content, bytes):
         content = content.decode("utf-8")
     return tomllib.loads(content)
-
-
-def read_toml(path: Path | str) -> dict[str, Any]:
-    """Read and parse a TOML file."""
-    with open(path, "rb") as stream:
-        return tomllib.load(stream)

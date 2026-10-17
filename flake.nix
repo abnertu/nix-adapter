@@ -23,7 +23,7 @@
           pkgs = nixpkgs.legacyPackages.${system};
           nix-adapter = pkgs.python3Packages.buildPythonPackage {
             pname = "nix-adapter";
-            version = "0.3.0";
+            version = "0.4.0";
             src = ./.;
             format = "pyproject";
             nativeBuildInputs = [ pkgs.python3Packages.flit-core ];

@@ -1,26 +1,45 @@
 # nix-adapter
 
-Cross-platform native reconciliation adapter for Nix deployments.
+Python primitives for adapters that reconcile live host state against declarations Nix has already evaluated. Nix generates a manifest; an adapter built on this library checks the host, applies only what differs and reports failures with full diagnostics.
 
-`nix-adapter` provides safe, atomic file operations, lossless diagnostics capture, and process execution primitives for reconciling native host operating system state against Nix-evaluated declarations.
+## Modules
 
-## Architecture
+| Module | Provides |
+| --- | --- |
+| `base` | `BaseAdapter`: desired state, file and command access, systemd unit convergence |
+| `service` | `BaseServiceAdapter`: one service with its account and unit files |
+| `files` | `Files`: owned paths, atomic writes, pending markers, drop-ins, config parsers |
+| `io` | Low-level atomic and symlink-safe file operations |
+| `native` | `Native`: command runner that keeps stdout, stderr and timeout output, with redaction |
+| `systemd` | `Systemd`: unit inspection and control |
+| `system` | Hostname, timezone, NTP, discard support, sub-UID/GID ranges |
+| `cli` | `run_adapter_cli`: the `preflight` / `converge` / `purge` entry point |
+| `progress` | `Progress`: the task display shared with Bash callers (`progress-renderer`) |
+| `lock` | `operation_lock`: an exclusive lock around one operation |
+| `testing` | `FakeNative`, `FakeProcess` for adapter tests |
+| `toml` | `parse_toml`, `dump_toml` |
 
-- **`nix_adapter.Native`**: Safe host command runner with complete stdout/stderr diagnostics capture, execution timeouts, and redaction.
-- **`nix_adapter.Files`**: Atomic file writes, SHA256 checksums, POSIX permissions, conflict detection, and systemd drop-in validation.
-- **`nix_adapter.exceptions.Conflict`**: Safe diagnostic exception type preventing sensitive config leakage.
+Errors that need an operator decision raise `Conflict`; an optional feature that was never prepared raises `NotReady`.
 
-## Usage in Nix Flakes
+## Use from a flake
 
 ```nix
 {
-  inputs = {
-    nix-adapter.url = "github:gin31259461/nix-adapter";
-  };
+  inputs.nix-adapter.url = "github:gin31259461/nix-adapter";
 
-  outputs = { self, nixpkgs, nix-adapter, ... }: {
-    # Access the Python interpreter preloaded with nix-adapter:
-    # nix-adapter.packages.${system}.adapterPython
+  outputs = { nix-adapter, ... }: {
+    # Python with nix-adapter on its path:
+    # nix-adapter.packages.x86_64-linux.adapterPython
   };
 }
 ```
+
+## Development
+
+```bash
+nix develop
+python -m unittest discover -s tests
+nix flake check
+```
+
+The only runtime dependency is `rich`.

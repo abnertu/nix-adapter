@@ -57,10 +57,6 @@ class BaseAdapter:
             raise Conflict(f"required system unit is missing or masked: {name}")
         return state
 
-    def require_unit(self, name: str) -> dict[str, str]:
-        """Alias for ready_unit."""
-        return self.ready_unit(name)
-
     def converge_unit(
         self,
         name: str,
