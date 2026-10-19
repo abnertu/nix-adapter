@@ -13,7 +13,7 @@ dependencies = [
 ]
 
 [project.urls]
-Source = "https://github.com/gin31259461/nix-adapter"
+Source = "https://github.com/abnertu/nix-adapter"
 
 [tool.pyright]
 include = ["src", "tests"]

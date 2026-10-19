@@ -27,7 +27,7 @@ Errors that need an operator decision raise `Conflict`; an optional feature that
 
 ```nix
 {
-  inputs.nix-adapter.url = "github:gin31259461/nix-adapter";
+  inputs.nix-adapter.url = "github:abnertu/nix-adapter";
 
   outputs = { nix-adapter, ... }: {
     # Python with nix-adapter on its path:
