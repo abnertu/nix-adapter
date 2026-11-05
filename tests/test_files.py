@@ -118,5 +118,60 @@ class FilesDiagnosticsTests(unittest.TestCase):
                 files.path("relative")
 
 
+class DropinTests(unittest.TestCase):
+    """Files.dropin checks every source systemd reads, in systemd's order."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        self.files = Files(self.root, (os.getuid(), os.getgid()))
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def put(self, name: str, text: str) -> Path:
+        path = self.root / name.lstrip("/")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+        return path
+
+    def test_sources_follow_systemd_precedence(self):
+        self.put("/usr/lib/systemd/journald.conf", "[Journal]\n")
+        self.put("/etc/systemd/journald.conf", "[Journal]\n")
+        self.put("/usr/lib/systemd/journald.conf.d/10-vendor.conf", "[Journal]\n")
+        self.put("/run/systemd/journald.conf.d/10-vendor.conf", "[Journal]\n")
+        self.put("/usr/lib/systemd/journald.conf.d/20-other.conf", "[Journal]\n")
+        self.assertEqual(
+            self.files.systemd_sources("journald"),
+            [
+                "/etc/systemd/journald.conf",
+                "/run/systemd/journald.conf.d/10-vendor.conf",
+                "/usr/lib/systemd/journald.conf.d/20-other.conf",
+            ],
+        )
+
+    def test_disagreeing_source_names_itself_and_both_values(self):
+        self.put(
+            "/etc/systemd/journald.conf.d/10-admin.conf",
+            "[Journal]\nStorage=persistent\n",
+        )
+        with self.assertRaises(Conflict) as raised:
+            self.files.dropin(
+                "journald", "[Journal]\nStorage=volatile\n", file_name="60-x.conf"
+            )
+        message = str(raised.exception)
+        self.assertIn("/etc/systemd/journald.conf.d/10-admin.conf", message)
+        self.assertIn("Storage=persistent (expected: volatile)", message)
+
+    def test_masked_sources_and_the_target_itself_are_ignored(self):
+        self.put("/etc/systemd/journald.conf.d/60-x.conf", "[Journal]\nStorage=old\n")
+        masked = self.root / "etc/systemd/journald.conf.d/10-masked.conf"
+        masked.symlink_to("/dev/null")
+        target = self.files.dropin(
+            "journald", "[Journal]\nStorage=volatile\n", file_name="60-x.conf"
+        )
+        self.assertEqual(target, "/etc/systemd/journald.conf.d/60-x.conf")
+
+
 if __name__ == "__main__":
     unittest.main()
