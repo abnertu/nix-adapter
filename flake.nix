@@ -15,6 +15,8 @@
         "aarch64-darwin"
       ];
       forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
+      # pyproject.toml holds the only version literal.
+      inherit (builtins.fromTOML (builtins.readFile ./pyproject.toml)) project;
     in
     {
       packages = forAllSystems (
@@ -23,7 +25,7 @@
           pkgs = nixpkgs.legacyPackages.${system};
           nix-adapter = pkgs.python3Packages.buildPythonPackage {
             pname = "nix-adapter";
-            version = "0.6.0";
+            inherit (project) version;
             src = ./.;
             format = "pyproject";
             nativeBuildInputs = [ pkgs.python3Packages.flit-core ];

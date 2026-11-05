@@ -1,5 +1,7 @@
 """Primitives for reconciling native host state against Nix-evaluated declarations."""
 
+from importlib.metadata import version
+
 from .base import BaseAdapter
 from .cli import run_adapter_cli
 from .exceptions import Conflict, NotReady
@@ -22,7 +24,7 @@ from .systemd import Systemd
 from .testing import FakeNative, FakeProcess
 from .toml import dump_toml, parse_toml
 
-__version__ = "0.6.0"
+__version__ = version("nix_adapter")
 
 __all__ = [
     "BaseAdapter",
