@@ -53,8 +53,13 @@ def replace_keys(text: str, desired: dict[str, str]) -> str:
     return result
 
 
-def locale_gen(text: str, locales: list[str]) -> str:
-    begin, end = "# BEGIN nix-config locales", "# END nix-config locales"
+def locale_gen(text: str, locales: list[str], *, block: str) -> str:
+    """Add locales to a locale.gen text inside the managed block named `block`.
+
+    The block is delimited by `# BEGIN <block>` and `# END <block>`; entries
+    outside it are validated and kept as the operator wrote them.
+    """
+    begin, end = f"# BEGIN {block}", f"# END {block}"
     outside: list[str] = []
     inside, seen = False, False
     for line in text.splitlines(keepends=True):
@@ -105,12 +110,34 @@ def ini(text: str) -> dict[tuple[str, str], str]:
     return result
 
 
+TEMPORARY_PREFIX = ".nix-adapter."
+
+
 class Files:
+    """Owned files under `root`, written atomically with a fixed identity.
+
+    `pending_template` names pending-marker files: a host path that contains
+    `{action}`. Marker operations fail while no template is set.
+    """
+
     def __init__(
-        self, root: Path | str = Path("/"), identity: tuple[int, int] = (0, 0)
+        self,
+        root: Path | str = Path("/"),
+        identity: tuple[int, int] = (0, 0),
+        *,
+        pending_template: str | None = None,
     ):
         self.root = Path(root)
         self.identity = identity
+        if pending_template is not None and "{action}" not in pending_template:
+            raise Conflict(
+                f"pending marker template lacks {{action}}: {pending_template}"
+            )
+        self.pending_template = pending_template
+
+    def with_pending_template(self, template: str) -> Files:
+        """A copy of these files that uses `template` for pending markers."""
+        return Files(self.root, self.identity, pending_template=template)
 
     def system_name(self, path: Path) -> str:
         """The host path that a root-relative path stands for, for diagnostics."""
@@ -170,7 +197,9 @@ class Files:
             return False
         path = self.path(name)
         path.parent.mkdir(parents=True, exist_ok=True)
-        descriptor, temporary = tempfile.mkstemp(prefix=".nix-config.", dir=path.parent)
+        descriptor, temporary = tempfile.mkstemp(
+            prefix=TEMPORARY_PREFIX, dir=path.parent
+        )
         try:
             with os.fdopen(descriptor, "w") as stream:
                 os.fchmod(stream.fileno(), mode)
@@ -219,34 +248,11 @@ class Files:
             return True
         return False
 
-    def timer_dropin(self, content: str) -> tuple[str, str]:
-        target = "/etc/systemd/system/fstrim.timer.d/60-nix-config.conf"
-        self.read(target)
-        for base in ("/usr/lib", "/usr/local/lib", "/run", "/etc"):
-            directory = self.path(base + "/systemd/system/fstrim.timer.d")
-            if directory.exists():
-                for file in directory.glob("*.conf"):
-                    name = "/" + str(file.relative_to(self.root))
-                    if name != target:
-                        values = ini(self.read(name))
-                        if any(
-                            section == "Timer" and key.startswith("On")
-                            for section, key in values
-                        ):
-                            raise Conflict(
-                                f"custom TRIM timing in {name} requires operator review"
-                            )
-                        if ("Timer", "Persistent") in values and values[
-                            ("Timer", "Persistent")
-                        ] != "false":
-                            persistent_val = values[("Timer", "Persistent")]
-                            raise Conflict(
-                                f"conflicting TRIM timer persistence override in {name} (Persistent={persistent_val})"
-                            )
-        return target, content
-
     def marker(self, action: str) -> str:
-        return f"/var/lib/nix-config/arch/system-{action}.pending"
+        """The host path of the pending marker for `action`."""
+        if self.pending_template is None:
+            raise Conflict(f"no pending marker template for action {action}")
+        return self.pending_template.format(action=action)
 
     def pending(self, action: str) -> bool:
         name = self.marker(action)
@@ -262,8 +268,13 @@ class Files:
             path.unlink()
             self.sync_dir(path.parent)
 
-    def dropin(self, name: str, text: str) -> str:
-        target = f"/etc/systemd/{name}.conf.d/60-nix-config.conf"
+    def dropin(self, name: str, text: str, *, file_name: str) -> str:
+        """Check that `text` can own `/etc/systemd/<name>.conf.d/<file_name>`.
+
+        Every other configuration source that systemd reads for `name` must
+        agree with the declared values; the target path is returned.
+        """
+        target = f"/etc/systemd/{name}.conf.d/{file_name}"
         desired = ini(text)
         # Respect systemd's basename precedence across vendor/runtime/admin files.
         bases = ["/usr/lib", "/usr/local/lib", "/run", "/etc"]

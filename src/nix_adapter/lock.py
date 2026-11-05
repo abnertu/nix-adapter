@@ -14,7 +14,7 @@ from .exceptions import Conflict
 
 @contextmanager
 def operation_lock(
-    path: Path | str = Path("/run/lock/nix-config.lock"),
+    path: Path | str,
     *,
     timeout: float | None = 0,
     label: str = "operation",

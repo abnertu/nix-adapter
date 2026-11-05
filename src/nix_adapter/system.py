@@ -11,7 +11,7 @@ from .exceptions import Conflict
 from .native import Native
 
 
-def get_timezone(runner: Native | None = None, root: Path | str = "/") -> str | None:
+def get_timezone(runner: Native, root: Path | str = "/") -> str | None:
     """Read timezone from /etc/localtime and timedatectl."""
     root_path = Path(root)
     localtime_path = root_path / "etc/localtime"
@@ -25,8 +25,7 @@ def get_timezone(runner: Native | None = None, root: Path | str = "/") -> str | 
         ) or ".." in target.removeprefix("../").split("/"):
             raise Conflict("localtime has an unexpected symlink target")
 
-    r = runner or Native()
-    values = r.run(
+    values = runner.run(
         "timedatectl",
         "show",
         "--property=Timezone",
@@ -38,40 +37,33 @@ def get_timezone(runner: Native | None = None, root: Path | str = "/") -> str | 
     return state.get("Timezone")
 
 
-def set_timezone(timezone: str, runner: Native | None = None) -> None:
+def set_timezone(timezone: str, runner: Native) -> None:
     """Set system timezone using timedatectl."""
-    r = runner or Native()
-    r.run("timedatectl", "set-timezone", timezone)
+    runner.run("timedatectl", "set-timezone", timezone)
 
 
-def get_hostname(runner: Native | None = None, kind: str = "--static") -> str:
+def get_hostname(runner: Native, kind: str = "--static") -> str:
     """Get system hostname using hostnamectl."""
-    r = runner or Native()
-    return r.run("hostnamectl", kind).stdout.strip()
+    return runner.run("hostnamectl", kind).stdout.strip()
 
 
-def set_hostname(
-    hostname: str, runner: Native | None = None, kind: str = "--static"
-) -> None:
+def set_hostname(hostname: str, runner: Native, kind: str = "--static") -> None:
     """Set system hostname using hostnamectl."""
-    r = runner or Native()
-    r.run("hostnamectl", kind, "set-hostname", hostname)
+    runner.run("hostnamectl", kind, "set-hostname", hostname)
 
 
-def is_ntp_synchronized(runner: Native | None = None) -> bool:
+def is_ntp_synchronized(runner: Native) -> bool:
     """Check if network time synchronization is currently active."""
-    r = runner or Native()
-    output = r.run(
+    output = runner.run(
         "timedatectl", "show", "--property=NTPSynchronized", "--value"
     ).stdout.strip()
     return output == "yes"
 
 
-def check_discard_support(runner: Native | None = None) -> bool:
+def check_discard_support(runner: Native) -> bool:
     """Inspect mounted block devices with lsblk to verify SSD trim/discard support."""
-    r = runner or Native()
     data = json.loads(
-        r.run(
+        runner.run(
             "lsblk",
             "--json",
             "--bytes",

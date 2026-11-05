@@ -9,8 +9,8 @@ from .native import Native
 
 
 class Systemd:
-    def __init__(self, runner: Native | None = None, user: bool = False):
-        self.runner = runner or Native()
+    def __init__(self, runner: Native, user: bool = False):
+        self.runner = runner
         self.user = user
 
     def _cmd(self, *args: str) -> list[str]:

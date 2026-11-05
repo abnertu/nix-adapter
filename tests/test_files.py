@@ -33,7 +33,7 @@ class FilesParsingTests(unittest.TestCase):
 
     def test_locale_gen(self):
         initial = "en_US.UTF-8 UTF-8\n"
-        result = locale_gen(initial, ["zh_TW.UTF-8"])
+        result = locale_gen(initial, ["zh_TW.UTF-8"], block="nix-config locales")
         self.assertIn("# BEGIN nix-config locales", result)
         self.assertIn("zh_TW.UTF-8 UTF-8", result)
         self.assertIn("# END nix-config locales", result)
@@ -49,7 +49,11 @@ class FilesOperationsTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.root = Path(self.temp_dir.name)
-        self.files = Files(root=self.root, identity=(os.getuid(), os.getgid()))
+        self.files = Files(
+            root=self.root,
+            identity=(os.getuid(), os.getgid()),
+            pending_template="/var/lib/test/{action}.pending",
+        )
 
     def tearDown(self):
         self.temp_dir.cleanup()

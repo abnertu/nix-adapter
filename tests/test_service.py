@@ -95,7 +95,11 @@ class ServiceAdapterTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             files = Files(root=root, identity=(os.getuid(), os.getgid()))
-            adapter = BaseAdapter(desired={"foo": "bar"}, root=root, files=files)
+
+            class MarkerAdapter(BaseAdapter):
+                pending_template = "/var/lib/test/{action}.pending"
+
+            adapter = MarkerAdapter(desired={"foo": "bar"}, root=root, files=files)
             self.assertEqual(adapter.desired, {"foo": "bar"})
             self.assertEqual(adapter.root, root)
             self.assertIs(adapter.native, adapter.runner)

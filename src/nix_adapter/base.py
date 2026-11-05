@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, ClassVar, cast
 
 from .exceptions import Conflict
 from .files import Files
@@ -14,7 +14,13 @@ from .systemd import Systemd
 
 
 class BaseAdapter[M: Mapping[str, Any] = dict[str, Any]]:
-    """Base for adapters that converge native state toward a manifest of type M."""
+    """Base for adapters that converge native state toward a manifest of type M.
+
+    Subclasses that record pending markers set `pending_template`, a host path
+    containing `{action}`.
+    """
+
+    pending_template: ClassVar[str | None] = None
 
     def __init__(
         self,
@@ -26,10 +32,19 @@ class BaseAdapter[M: Mapping[str, Any] = dict[str, Any]]:
         self.desired = desired
         self.root = Path(root)
         self.runner = runner or Native()
-        self.files = files or Files(self.root)
+        self.files = self._files(files)
         self.systemd = Systemd(self.runner)
         self.updates: int = 0
         self.actions: int = 0
+
+    def _files(self, files: Files | None) -> Files:
+        """The adapter's files, given this adapter's pending-marker template."""
+        template = self.pending_template
+        if files is None:
+            return Files(self.root, pending_template=template)
+        if files.pending_template is None and template is not None:
+            return files.with_pending_template(template)
+        return files
 
     @property
     def native(self) -> Native:
