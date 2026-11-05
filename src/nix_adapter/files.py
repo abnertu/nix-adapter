@@ -11,29 +11,42 @@ from pathlib import Path
 
 from .exceptions import Conflict
 
+ASSIGNMENT = re.compile(r"\s*([A-Z][A-Z0-9_]*)\s*=\s*(.*?)\s*")
+SHELL_EXPANSION = ("$", "`", "\\")
 
-def assignments(text: str) -> dict[str, str]:
-    """Parse environment-style files without evaluating shell or losing comments."""
+
+def assignments(text: str, *, source: str) -> dict[str, str]:
+    """Parse an environment-style file without evaluating shell syntax.
+
+    Each line is blank, a comment or one `KEY=value` with a single word value.
+    Errors name `source`, the line and the key, never the value, which can
+    hold a secret.
+    """
     result: dict[str, str] = {}
-    for line in text.splitlines():
+    for number, line in enumerate(text.splitlines(), start=1):
         if not line.strip() or line.lstrip().startswith("#"):
             continue
-        match = re.fullmatch(r"\s*([A-Z][A-Z0-9_]*)\s*=\s*(.*?)\s*", line)
+        location = f"{source}:{number}"
+        match = ASSIGNMENT.fullmatch(line)
         if not match:
-            raise Conflict("unsupported shared configuration syntax")
+            raise Conflict(f"unsupported shared configuration syntax at {location}")
         key, raw = match.groups()
         try:
             words = shlex.split(raw, comments=True)
         except ValueError:
-            raise Conflict("invalid shared configuration quoting") from None
-        if len(words) > 1 or key in result or any(c in raw for c in ("$", "`", "\\")):
-            raise Conflict("ambiguous shared configuration assignment")
+            raise Conflict(f"invalid quoting of {key} at {location}") from None
+        if len(words) > 1 or key in result or any(c in raw for c in SHELL_EXPANSION):
+            raise Conflict(f"ambiguous assignment of {key} at {location}")
         result[key] = words[0] if words else ""
     return result
 
 
-def replace_keys(text: str, desired: dict[str, str]) -> str:
-    assignments(text)  # Validate every line, including unowned assignments.
+def replace_keys(text: str, desired: dict[str, str], *, source: str) -> str:
+    """Set the `desired` keys of an environment-style file and keep all else.
+
+    Existing assignments are replaced in place; missing keys are appended.
+    """
+    assignments(text, source=source)  # Validate unowned lines too.
     remaining = dict(desired)
     lines: list[str] = []
     for line in text.splitlines(keepends=True):
@@ -53,7 +66,7 @@ def replace_keys(text: str, desired: dict[str, str]) -> str:
     return result
 
 
-def locale_gen(text: str, locales: list[str], *, block: str) -> str:
+def locale_gen(text: str, locales: list[str], *, block: str, source: str) -> str:
     """Add locales to a locale.gen text inside the managed block named `block`.
 
     The block is delimited by `# BEGIN <block>` and `# END <block>`; entries
@@ -65,19 +78,21 @@ def locale_gen(text: str, locales: list[str], *, block: str) -> str:
     for line in text.splitlines(keepends=True):
         if line.strip() == begin:
             if inside or seen:
-                raise Conflict("duplicate locale managed block")
+                raise Conflict(f"duplicate managed block {block} in {source}")
             inside, seen = True, True
         elif line.strip() == end:
             if not inside:
-                raise Conflict("unmatched locale managed block")
+                raise Conflict(f"unmatched end of managed block {block} in {source}")
             inside = False
         elif not inside:
             entry = line.split("#", 1)[0].strip()
             if entry and not re.fullmatch(r"[A-Za-z0-9_.@-]+\s+[A-Za-z0-9-]+", entry):
-                raise Conflict("unsupported locale generator syntax")
+                raise Conflict(
+                    f"unsupported locale generator syntax in {source}: {entry}"
+                )
             outside.append(line)
     if inside:
-        raise Conflict("unterminated locale managed block")
+        raise Conflict(f"unterminated managed block {block} in {source}")
     prefix = "".join(outside)
     enabled = {line.split("#", 1)[0].strip() for line in prefix.splitlines()}
     additions = [
@@ -90,7 +105,8 @@ def locale_gen(text: str, locales: list[str], *, block: str) -> str:
     )
 
 
-def ini(text: str) -> dict[tuple[str, str], str]:
+def ini(text: str, *, source: str) -> dict[tuple[str, str], str]:
+    """Parse a systemd-style INI file into `(section, key)` pairs."""
     section: str | None = None
     result: dict[tuple[str, str], str] = {}
     for line in text.splitlines():
@@ -103,10 +119,12 @@ def ini(text: str) -> dict[tuple[str, str], str]:
             key, val = value.split("=", 1)
             pair = (section, key.strip())
             if pair in result:
-                raise Conflict("duplicate systemd configuration key")
+                raise Conflict(f"duplicate key [{section}] {pair[1]} in {source}")
             result[pair] = val.strip()
         else:
-            raise Conflict("unsupported systemd configuration syntax")
+            raise Conflict(
+                f"unsupported systemd configuration syntax in {source}: {value}"
+            )
     return result
 
 
@@ -226,7 +244,7 @@ class Files:
         candidate = base / name
         resolved = candidate.resolve()
         if not resolved.is_relative_to(base):
-            raise Conflict("zoneinfo alias escapes the native database")
+            raise Conflict(f"zoneinfo alias {name} escapes the native database")
         return resolved.is_file()
 
     def metadata_matches(self, name: str, symlink: bool = False) -> bool:
@@ -275,7 +293,7 @@ class Files:
         agree with the declared values; the target path is returned.
         """
         target = f"/etc/systemd/{name}.conf.d/{file_name}"
-        desired = ini(text)
+        desired = ini(text, source=f"declared {name} configuration")
         # Respect systemd's basename precedence across vendor/runtime/admin files.
         bases = ["/usr/lib", "/usr/local/lib", "/run", "/etc"]
         main = next(
@@ -302,7 +320,7 @@ class Files:
             path = self.path(source, symlink_leaf=True)
             if path.is_symlink() and os.readlink(path) == "/dev/null":
                 continue
-            values = ini(self.read(source))
+            values = ini(self.read(source), source=source)
             conflicts = [
                 f"[{sec}] {k}={values[(sec, k)]} (expected: {v})"
                 for (sec, k), v in desired.items()

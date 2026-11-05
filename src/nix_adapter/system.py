@@ -16,14 +16,16 @@ def get_timezone(runner: Native, root: Path | str = "/") -> str | None:
     root_path = Path(root)
     localtime_path = root_path / "etc/localtime"
     if localtime_path.exists() and not localtime_path.is_symlink():
-        raise Conflict("localtime is not a zoneinfo symlink")
+        raise Conflict(f"{localtime_path} is not a zoneinfo symlink")
     if localtime_path.is_symlink():
         target = os.readlink(localtime_path)
         if not (
             target.startswith("/usr/share/zoneinfo/")
             or target.startswith("../usr/share/zoneinfo/")
         ) or ".." in target.removeprefix("../").split("/"):
-            raise Conflict("localtime has an unexpected symlink target")
+            raise Conflict(
+                f"{localtime_path} has an unexpected symlink target: {target}"
+            )
 
     values = runner.run(
         "timedatectl",
@@ -33,7 +35,9 @@ def get_timezone(runner: Native, root: Path | str = "/") -> str | None:
     ).stdout
     state = dict(line.split("=", 1) for line in values.splitlines() if "=" in line)
     if state.get("LocalRTC") != "no":
-        raise Conflict("local RTC requires an explicit operator decision")
+        raise Conflict(
+            "timedatectl reports LocalRTC; a local RTC needs an operator decision"
+        )
     return state.get("Timezone")
 
 

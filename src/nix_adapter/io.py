@@ -21,7 +21,7 @@ def directory_fd(path: Path, *, create: bool = False):
     descriptor, so swapping an ancestor cannot redirect a privileged operation.
     """
     if not path.is_absolute() or ".." in path.parts:
-        raise Conflict("managed paths must be absolute without traversal")
+        raise Conflict(f"managed path must be absolute without traversal: {path}")
     fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
     try:
         for part in path.parts[1:]:
@@ -33,7 +33,7 @@ def directory_fd(path: Path, *, create: bool = False):
                     pass
                 except OSError as error:
                     raise Conflict(
-                        f"failed to create directory {part}: {error}"
+                        f"failed to create directory {part} of {path}: {error}"
                     ) from None
             try:
                 child = os.open(
@@ -44,7 +44,9 @@ def directory_fd(path: Path, *, create: bool = False):
             except FileNotFoundError:
                 raise
             except OSError as error:
-                raise Conflict(f"failed to open directory {part}: {error}") from None
+                raise Conflict(
+                    f"failed to open directory {part} of {path}: {error}"
+                ) from None
             os.close(fd)
             fd = child
         yield fd
@@ -60,7 +62,7 @@ def regular_file(parent: int, name: str):
     try:
         info = os.fstat(fd)
         if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
-            raise Conflict("managed file has an unexpected type or hard links")
+            raise Conflict(f"managed file {name} has an unexpected type or hard links")
         with os.fdopen(fd, "r", closefd=False) as stream:
             yield stream, info
     finally:
@@ -82,7 +84,7 @@ def ensure_directory(path: Path, *, mode: int, uid: int, gid: int) -> None:
     with directory_fd(path, create=True) as fd:
         info = os.fstat(fd)
         if info.st_uid not in (os.geteuid(), uid) and os.geteuid() != 0:
-            raise Conflict("managed directory has an unexpected owner")
+            raise Conflict(f"managed directory {path} has an unexpected owner")
         if (info.st_uid, info.st_gid) != (uid, gid):
             os.fchown(fd, uid, gid)
         if stat.S_IMODE(info.st_mode) != mode:
@@ -119,7 +121,7 @@ def atomic_write(
         try:
             with regular_file(parent, path.name) as (stream, current):
                 if current.st_uid not in (os.geteuid(), uid) and os.geteuid() != 0:
-                    raise Conflict("managed file has an unexpected owner")
+                    raise Conflict(f"managed file {path} has an unexpected owner")
                 if (
                     stream.read() == content
                     and stat.S_IMODE(current.st_mode) == mode

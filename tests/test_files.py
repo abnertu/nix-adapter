@@ -18,29 +18,47 @@ from nix_adapter import (
 class FilesParsingTests(unittest.TestCase):
     def test_assignments_valid(self):
         text = 'FOO=bar\n# comment\nBAZ="hello world"\n'
-        self.assertEqual(assignments(text), {"FOO": "bar", "BAZ": "hello world"})
+        self.assertEqual(
+            assignments(text, source="/etc/test"), {"FOO": "bar", "BAZ": "hello world"}
+        )
 
     def test_assignments_invalid(self):
         with self.assertRaises(Conflict):
-            assignments("invalid line")
+            assignments("invalid line", source="/etc/test")
+
+    def test_assignment_errors_name_the_key_but_never_the_value(self):
+        text = "TOKEN=first\nTOKEN=glrt-secret-value\n"
+        with self.assertRaises(Conflict) as raised:
+            assignments(text, source="/etc/default/runner")
+        message = str(raised.exception)
+        self.assertIn("TOKEN", message)
+        self.assertIn("/etc/default/runner:2", message)
+        self.assertNotIn("glrt-secret-value", message)
 
     def test_replace_keys(self):
         text = "FOO=bar\nKEEP=me\n"
-        result = replace_keys(text, {"FOO": "new_val", "ADD": "added"})
+        result = replace_keys(
+            text, {"FOO": "new_val", "ADD": "added"}, source="/etc/test"
+        )
         self.assertIn("FOO=new_val\n", result)
         self.assertIn("KEEP=me\n", result)
         self.assertIn("ADD=added\n", result)
 
     def test_locale_gen(self):
         initial = "en_US.UTF-8 UTF-8\n"
-        result = locale_gen(initial, ["zh_TW.UTF-8"], block="nix-config locales")
+        result = locale_gen(
+            initial,
+            ["zh_TW.UTF-8"],
+            block="nix-config locales",
+            source="/etc/locale.gen",
+        )
         self.assertIn("# BEGIN nix-config locales", result)
         self.assertIn("zh_TW.UTF-8 UTF-8", result)
         self.assertIn("# END nix-config locales", result)
 
     def test_ini_parsing(self):
         text = "[Section1]\nkey1 = value1\n[Section2]\nkey2 = value2\n"
-        parsed = ini(text)
+        parsed = ini(text, source="/etc/test.conf")
         self.assertEqual(parsed[("Section1", "key1")], "value1")
         self.assertEqual(parsed[("Section2", "key2")], "value2")
 

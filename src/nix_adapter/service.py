@@ -51,7 +51,7 @@ class BaseServiceAdapter[M: Mapping[str, Any] = dict[str, Any]](BaseAdapter[M]):
     ) -> bool:
         """Write a systemd unit file atomically with receipt checking."""
         if not isinstance(unit, str):
-            raise Conflict("unit content is invalid")
+            raise Conflict(f"unit content for {path} is not text")
         if path.exists() and (
             path.is_symlink() or not path.is_file() or path.stat().st_nlink != 1
         ):
