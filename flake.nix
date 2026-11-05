@@ -34,7 +34,7 @@
               python -m unittest discover -s tests
             '';
           };
-          adapterPython = pkgs.python3.withPackages (ps: [ nix-adapter ]);
+          adapterPython = pkgs.python3.withPackages (_: [ nix-adapter ]);
         in
         {
           inherit nix-adapter adapterPython;
@@ -51,21 +51,44 @@
         {
           package = self.packages.${system}.default;
 
-          source-format = pkgs.runCommand "nix-adapter-source-format" {
-            nativeBuildInputs = [ pkgs.ruff ];
-          } ''
-            ruff check --no-cache ${./.}
-            ruff format --no-cache --check ${./.}
-            touch "$out"
-          '';
+          source-format =
+            pkgs.runCommand "nix-adapter-source-format"
+              {
+                nativeBuildInputs = [ pkgs.ruff ];
+              }
+              ''
+                ruff check --no-cache ${./.}
+                ruff format --no-cache --check ${./.}
+                touch "$out"
+              '';
 
-          python-types = pkgs.runCommand "nix-adapter-python-types" {
-            nativeBuildInputs = [ pkgs.pyright ];
-          } ''
-            cd ${./.}
-            pyright --pythonpath ${python}/bin/python
-            touch "$out"
-          '';
+          source-lint =
+            pkgs.runCommand "nix-adapter-source-lint"
+              {
+                nativeBuildInputs = [
+                  pkgs.deadnix
+                  pkgs.nixfmt
+                  pkgs.statix
+                ];
+              }
+              ''
+                cd ${./.}
+                statix check .
+                deadnix --fail flake.nix
+                nixfmt --check flake.nix
+                touch "$out"
+              '';
+
+          python-types =
+            pkgs.runCommand "nix-adapter-python-types"
+              {
+                nativeBuildInputs = [ pkgs.pyright ];
+              }
+              ''
+                cd ${./.}
+                pyright --pythonpath ${python}/bin/python
+                touch "$out"
+              '';
         }
       );
 

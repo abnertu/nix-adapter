@@ -26,6 +26,13 @@ useLibraryCodeForTypes = true
 line-length = 88
 
 [tool.ruff.lint]
-select = ["E", "W", "F", "I", "B", "UP", "SIM", "RUF"]
+select = ["E", "W", "F", "I", "B", "UP", "SIM", "RUF", "C901", "PLR0911", "PLR0912", "PLR0915"]
 # The formatter owns line length.
 ignore = ["E501"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.per-file-ignores]
+# Temporary: run_adapter_cli is split in the typed-protocol refactor.
+"src/nix_adapter/cli.py" = ["C901", "PLR0912"]
