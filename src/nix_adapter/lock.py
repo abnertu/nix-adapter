@@ -19,10 +19,12 @@ def operation_lock(
     timeout: float | None = 0,
     label: str = "operation",
 ):
-    """Serialize mutations across processes using an exclusive file lock.
+    """Hold an exclusive lock on the file `path` for the `with` block.
 
-    If timeout is 0 (default), non-blocking lock is attempted. If timeout > 0, polls
-    until lock is acquired or timeout expires.
+    With `timeout` 0 the lock is tried once; with a positive `timeout` it is
+    polled until then; with `None` it is polled without limit. Raise
+    `Conflict` if another process holds it, or if the lock file is not a
+    regular file owned by this user.
     """
     lock_path = Path(path)
     lock_path.parent.mkdir(parents=True, exist_ok=True)
@@ -34,7 +36,7 @@ def operation_lock(
         if not stat.S_ISREG(entry.st_mode) or (
             entry.st_uid != os.geteuid() and os.geteuid() != 0
         ):
-            raise Conflict(f"{label} lock has an unexpected owner or type")
+            raise Conflict(f"{label} lock {lock_path} has an unexpected owner or type")
 
         start_time = time.monotonic()
         while True:
@@ -45,7 +47,9 @@ def operation_lock(
                 if timeout is not None and (time.monotonic() - start_time) < timeout:
                     time.sleep(0.05)
                     continue
-                raise Conflict(f"another {label} is already running") from None
+                raise Conflict(
+                    f"another {label} is already running (lock {lock_path})"
+                ) from None
         yield
     finally:
         os.close(descriptor)

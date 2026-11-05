@@ -150,7 +150,7 @@ class CliTests(unittest.TestCase):
             code = run_adapter_cli(DummyAdapter, allow_skip=True, require_root=False)
             self.assertEqual(code, 20)
 
-    def test_verbose_flag_reaches_the_adapter_runner(self):
+    def test_verbose_flag_reaches_the_adapter_native_runner(self):
         from nix_adapter.base import BaseAdapter
 
         built = []
@@ -168,7 +168,7 @@ class CliTests(unittest.TestCase):
                 self.assertEqual(
                     run_adapter_cli(factory, argv=argv, require_root=False), 0
                 )
-                self.assertIs(built[-1].runner.verbose, verbose)
+                self.assertIs(built[-1].native.verbose, verbose)
 
     def test_manifest_must_be_a_json_object(self):
         with tempfile.TemporaryDirectory() as d:

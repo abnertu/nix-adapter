@@ -1,80 +1,90 @@
-"""Systemd service and unit management."""
+"""Systemd unit inspection and control through `systemctl`."""
 
 from __future__ import annotations
 
+import subprocess
 from collections.abc import Sequence
 
 from .exceptions import Conflict
 from .native import Native
 
+UNIT_STATE = ("LoadState", "ActiveState", "UnitFileState")
+MASKED = ("masked", "masked-runtime")
+
 
 class Systemd:
-    def __init__(self, runner: Native, user: bool = False):
-        self.runner = runner
+    """`systemctl` for the system manager, or for the user manager if `user`.
+
+    Every method runs `systemctl` through `Native.run` and raises `Conflict`
+    as it does: when the command cannot start or times out, and, except for
+    the `is_*` queries, when it exits nonzero.
+    """
+
+    def __init__(self, native: Native, user: bool = False):
+        self.native = native
         self.user = user
 
-    def _cmd(self, *args: str) -> list[str]:
-        cmd = ["systemctl"]
-        if self.user:
-            cmd.append("--user")
-        cmd.extend(args)
-        return cmd
+    def _systemctl(
+        self, *args: str, check: bool = True
+    ) -> subprocess.CompletedProcess[str]:
+        scope = ["--user"] if self.user else []
+        return self.native.run("systemctl", *scope, *args, check=check)
+
+    def _succeeds(self, *args: str) -> bool:
+        return self._systemctl(*args, check=False).returncode == 0
 
     def show(
         self, unit: str, properties: Sequence[str] | None = None
     ) -> dict[str, str]:
+        """The unit's properties as reported by `systemctl show`.
+
+        Raise `Conflict` if `systemctl` fails.
+        """
         args = ["show", unit]
         if properties:
             args.append(f"--property={','.join(properties)}")
-        res = self.runner.run(*self._cmd(*args))
-        return dict(
-            line.split("=", 1) for line in res.stdout.splitlines() if "=" in line
-        )
+        output = self._systemctl(*args).stdout
+        return dict(line.split("=", 1) for line in output.splitlines() if "=" in line)
 
     def ready_unit(self, unit: str) -> dict[str, str]:
-        state = self.show(
-            unit, properties=["LoadState", "ActiveState", "UnitFileState"]
-        )
-        if state.get("LoadState") != "loaded" or state.get("UnitFileState") in (
-            "masked",
-            "masked-runtime",
-        ):
+        """The unit's state; raise `Conflict` if it is not loaded or is masked."""
+        state = self.show(unit, properties=UNIT_STATE)
+        if state.get("LoadState") != "loaded" or state.get("UnitFileState") in MASKED:
             raise Conflict(f"required unit {unit} is missing or masked")
         return state
 
     def is_active(self, unit: str) -> bool:
-        res = self.runner.run(*self._cmd("is-active", "--quiet", unit), check=False)
-        return res.returncode == 0
+        """Whether the unit is active."""
+        return self._succeeds("is-active", "--quiet", unit)
 
     def is_enabled(self, unit: str) -> bool:
-        res = self.runner.run(*self._cmd("is-enabled", "--quiet", unit), check=False)
-        return res.returncode == 0
+        """Whether the unit is enabled."""
+        return self._succeeds("is-enabled", "--quiet", unit)
 
     def enable(self, unit: str, now: bool = False) -> None:
-        args = ["enable"]
-        if now:
-            args.append("--now")
-        args.append(unit)
-        self.runner.run(*self._cmd(*args))
+        """Enable the unit, and start it too if `now`."""
+        self._systemctl("enable", *(["--now"] if now else []), unit)
 
     def disable(self, unit: str, now: bool = False) -> None:
-        args = ["disable"]
-        if now:
-            args.append("--now")
-        args.append(unit)
-        self.runner.run(*self._cmd(*args))
+        """Disable the unit, and stop it too if `now`."""
+        self._systemctl("disable", *(["--now"] if now else []), unit)
 
     def start(self, unit: str) -> None:
-        self.runner.run(*self._cmd("start", unit))
+        """Start the unit."""
+        self._systemctl("start", unit)
 
     def stop(self, unit: str) -> None:
-        self.runner.run(*self._cmd("stop", unit))
+        """Stop the unit."""
+        self._systemctl("stop", unit)
 
     def restart(self, unit: str) -> None:
-        self.runner.run(*self._cmd("restart", unit))
+        """Restart the unit."""
+        self._systemctl("restart", unit)
 
     def reload(self, unit: str) -> None:
-        self.runner.run(*self._cmd("reload", unit))
+        """Reload the unit's configuration."""
+        self._systemctl("reload", unit)
 
     def daemon_reload(self) -> None:
-        self.runner.run(*self._cmd("daemon-reload"))
+        """Reload the manager's unit files."""
+        self._systemctl("daemon-reload")

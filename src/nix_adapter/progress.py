@@ -27,8 +27,19 @@ def _clean(value: str) -> str:
     )
 
 
+STATUS_STYLES = {"done": "green", "skip": "yellow", "failed": "red"}
+STATUS_ICONS = {"done": "✓", "skip": "↷", "failed": "✗"}
+STATUS_ASCII_ICONS = {"done": "+", "skip": "-", "failed": "!"}
+COMPACT_WIDTH = 38
+"""Below this width a task renders as one plain line."""
+PROGRESS_BAR_WIDTH = 60
+"""From this width a task with a total also shows a progress bar."""
+
+
 @dataclass
 class Task:
+    """One running task line; finish it exactly once."""
+
     _owner: Progress
     label: str
     total: int | None = None
@@ -38,6 +49,7 @@ class Task:
     spinner: Spinner = field(default_factory=lambda: Spinner("dots", style="cyan"))
 
     def update(self, completed: int, total: int | None = None) -> None:
+        """Report progress; values are clamped to `[0, total]`."""
         if self._finished:
             return
         if total is not None:
@@ -48,11 +60,13 @@ class Task:
         self._owner.refresh()
 
     def finish(self, status: str = "done") -> None:
+        """End the task as `done`, `skip` or `failed`; later calls do nothing."""
         if not self._finished:
             self._finished = True
             self._owner.finish_task(self, status)
 
     def external_output(self):
+        """Pause the display while a child process writes to the terminal."""
         return self._owner.external_output()
 
 
@@ -121,6 +135,7 @@ class Progress:
                     live.stop()
 
     def active(self) -> Task | None:
+        """The innermost running task."""
         return self._tasks[-1] if self._tasks else None
 
     def _row(
@@ -129,51 +144,62 @@ class Progress:
         current = task or self.active()
         if current is None:
             return Text("")
-        styles = {"done": "green", "skip": "yellow", "failed": "red"}
-        icons = {"done": "✓", "skip": "↷", "failed": "✗"}
-        ascii_icons = {"done": "+", "skip": "-", "failed": "!"}
         width = max(1, self._console.width - 1)
         elapsed = f"{max(0.0, time.monotonic() - current.started):.1f}s"
-        label = Text(current.label, style=styles.get(status or "", "bold"))
-        if width < 38:
-            symbols = icons if self._unicode else ascii_icons
-            line = Text(f"{symbols.get(status or '', '·' if self._unicode else '*')} ")
-            line.append_text(label)
-            line.append(f"  {elapsed}", style="dim")
-            line.truncate(width, overflow="ellipsis" if self._unicode else "crop")
-            return line
+        label = Text(current.label, style=STATUS_STYLES.get(status or "", "bold"))
+        if width < COMPACT_WIDTH:
+            return self._compact_row(label, elapsed, status, width)
+        return self._table_row(current, label, elapsed, status, width)
+
+    def _icons(self) -> dict[str, str]:
+        return STATUS_ICONS if self._unicode else STATUS_ASCII_ICONS
+
+    def _compact_row(
+        self, label: Text, elapsed: str, status: str | None, width: int
+    ) -> Text:
+        running = "·" if self._unicode else "*"
+        line = Text(f"{self._icons().get(status or '', running)} ")
+        line.append_text(label)
+        line.append(f"  {elapsed}", style="dim")
+        line.truncate(width, overflow="ellipsis" if self._unicode else "crop")
+        return line
+
+    def _table_row(
+        self, task: Task, label: Text, elapsed: str, status: str | None, width: int
+    ) -> Table:
+        show_bar = (
+            status is None and task.total is not None and width >= PROGRESS_BAR_WIDTH
+        )
         table = Table.grid(expand=True, padding=(0, 1))
         table.width = width
         table.add_column(width=1)
         table.add_column(ratio=1, no_wrap=True, overflow="ellipsis")
-        if status is None and current.total is not None and width >= 60:
+        if show_bar:
             table.add_column(width=min(22, width // 4))
             table.add_column(justify="right", no_wrap=True)
         table.add_column(justify="right", no_wrap=True)
+        icon: RenderableType = task.spinner
         if status:
-            icon: RenderableType = Text(
-                icons[status] if self._unicode else ascii_icons[status],
-                style=styles[status],
-            )
-        else:
-            icon = current.spinner
+            icon = Text(self._icons()[status], style=STATUS_STYLES[status])
         cells: list[RenderableType] = [icon, label]
-        if status is None and current.total is not None and width >= 60:
-            cells.extend(
-                [
-                    ProgressBar(
-                        total=max(1, current.total),
-                        completed=current.completed,
-                        style="grey23",
-                        complete_style="cyan",
-                        finished_style="green",
-                    ),
-                    Text(f"{current.completed}/{current.total}", style="cyan"),
-                ]
-            )
+        if show_bar and task.total is not None:  # Repeated for type narrowing.
+            cells += [
+                self._bar(task, task.total),
+                Text(f"{task.completed}/{task.total}", style="cyan"),
+            ]
         cells.append(Text(elapsed, style="dim"))
         table.add_row(*cells)
         return table
+
+    @staticmethod
+    def _bar(task: Task, total: int) -> ProgressBar:
+        return ProgressBar(
+            total=max(1, total),
+            completed=task.completed,
+            style="grey23",
+            complete_style="cyan",
+            finished_style="green",
+        )
 
     def _stop(self) -> None:
         live, self._live = self._live, None
@@ -181,6 +207,8 @@ class Progress:
             live.stop()
 
     def refresh(self) -> None:
+        """Redraw the active task, or stop the display when none is shown."""
+
         def render() -> None:
             if not self._animated or self._suspended or self._closed or not self._tasks:
                 self._stop()
@@ -208,6 +236,7 @@ class Progress:
         self.stream.flush()
 
     def start(self, label: str, total: int | None = None) -> Task:
+        """Start a task; prefer the `task` context manager."""
         task = Task(self, _clean(label), max(0, total) if total is not None else None)
         if not self._unicode:
             task.spinner = Spinner("line", style="cyan")
@@ -219,6 +248,7 @@ class Progress:
 
     @contextmanager
     def task(self, label: str, total: int | None = None) -> Generator[Task]:
+        """Run a task block; it finishes `failed` if the block raises."""
         task = self.start(label, total)
         try:
             yield task
@@ -229,6 +259,7 @@ class Progress:
             task.finish("done")
 
     def finish_task(self, task: Task, status: str) -> None:
+        """Print the final line of `task`; called by `Task.finish`."""
         status = status if status in {"done", "skip", "failed"} else "failed"
         self._safe(self._stop)
         if task in self._tasks:
@@ -240,15 +271,18 @@ class Progress:
         self.refresh()
 
     def suspend(self) -> None:
+        """Hide the display until a matching `resume`."""
         self._suspended += 1
         self._safe(self._stop)
 
     def resume(self) -> None:
+        """Undo one `suspend`."""
         self._suspended = max(0, self._suspended - 1)
         self.refresh()
 
     @contextmanager
     def external_output(self):
+        """Yield the stream with the display hidden, for child process output."""
         self.suspend()
         try:
             yield self.stream
@@ -256,6 +290,7 @@ class Progress:
             self.resume()
 
     def close(self) -> None:
+        """Fail the unfinished tasks and stop the display."""
         self._closed = True
         for task in reversed(self._tasks.copy()):
             task.finish("failed")

@@ -34,7 +34,7 @@ class ConvergeUnitTests(unittest.TestCase):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         self.native = FakeSystemd()
-        self.adapter = BaseAdapter({}, root=temp.name, runner=self.native)
+        self.adapter = BaseAdapter({}, root=temp.name, native=self.native)
         self.marks = []
 
     def converge(self, **kwargs):
@@ -73,7 +73,7 @@ class PlanTests(unittest.TestCase):
         self.addCleanup(temp.cleanup)
         self.native = FakeSystemd()
         files = Files(temp.name, (os.getuid(), os.getgid()))
-        self.adapter = BaseAdapter({}, root=temp.name, runner=self.native, files=files)
+        self.adapter = BaseAdapter({}, root=temp.name, native=self.native, files=files)
 
     def test_plan_unit_matches_what_converge_unit_would_do(self):
         self.assertEqual(

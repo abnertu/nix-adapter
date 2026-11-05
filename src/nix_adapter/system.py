@@ -1,4 +1,8 @@
-"""General Linux system administration and hardware inspection primitives."""
+"""General Linux system administration and hardware inspection primitives.
+
+Each helper that takes a `Native` runs its command through it and raises
+`Conflict` as `Native.run` does when the command fails.
+"""
 
 from __future__ import annotations
 
@@ -8,11 +12,16 @@ from pathlib import Path
 from typing import Any
 
 from .exceptions import Conflict
+from .io import atomic_write, read_managed
 from .native import Native
 
 
-def get_timezone(runner: Native, root: Path | str = "/") -> str | None:
-    """Read timezone from /etc/localtime and timedatectl."""
+def get_timezone(native: Native, root: Path | str = "/") -> str | None:
+    """The timezone that timedatectl reports.
+
+    Raise `Conflict` if `/etc/localtime` is not a symlink into the zoneinfo
+    database, or if the RTC keeps local time.
+    """
     root_path = Path(root)
     localtime_path = root_path / "etc/localtime"
     if localtime_path.exists() and not localtime_path.is_symlink():
@@ -27,7 +36,7 @@ def get_timezone(runner: Native, root: Path | str = "/") -> str | None:
                 f"{localtime_path} has an unexpected symlink target: {target}"
             )
 
-    values = runner.run(
+    values = native.run(
         "timedatectl",
         "show",
         "--property=Timezone",
@@ -41,33 +50,37 @@ def get_timezone(runner: Native, root: Path | str = "/") -> str | None:
     return state.get("Timezone")
 
 
-def set_timezone(timezone: str, runner: Native) -> None:
+def set_timezone(timezone: str, native: Native) -> None:
     """Set system timezone using timedatectl."""
-    runner.run("timedatectl", "set-timezone", timezone)
+    native.run("timedatectl", "set-timezone", timezone)
 
 
-def get_hostname(runner: Native, kind: str = "--static") -> str:
+def get_hostname(native: Native, kind: str = "--static") -> str:
     """Get system hostname using hostnamectl."""
-    return runner.run("hostnamectl", kind).stdout.strip()
+    return native.run("hostnamectl", kind).stdout.strip()
 
 
-def set_hostname(hostname: str, runner: Native, kind: str = "--static") -> None:
+def set_hostname(hostname: str, native: Native, kind: str = "--static") -> None:
     """Set system hostname using hostnamectl."""
-    runner.run("hostnamectl", kind, "set-hostname", hostname)
+    native.run("hostnamectl", kind, "set-hostname", hostname)
 
 
-def is_ntp_synchronized(runner: Native) -> bool:
+def is_ntp_synchronized(native: Native) -> bool:
     """Check if network time synchronization is currently active."""
-    output = runner.run(
+    output = native.run(
         "timedatectl", "show", "--property=NTPSynchronized", "--value"
     ).stdout.strip()
     return output == "yes"
 
 
-def check_discard_support(runner: Native) -> bool:
-    """Inspect mounted block devices with lsblk to verify SSD trim/discard support."""
+def check_discard_support(native: Native) -> bool:
+    """Return `True` if a mounted, unencrypted block device supports discard.
+
+    Raise `Conflict` if a mounted device is encrypted, or if `lsblk` finds no
+    mounted discard-capable device.
+    """
     data = json.loads(
-        runner.run(
+        native.run(
             "lsblk",
             "--json",
             "--bytes",
@@ -83,7 +96,7 @@ def check_discard_support(runner: Native) -> bool:
             mounted = any(device.get("mountpoints") or [])
             if mounted and crypt:
                 raise Conflict(
-                    "encrypted mounted storage needs a separate discard policy"
+                    f"encrypted mounted device {device.get('name')} needs a separate discard policy"
                 )
             suitable |= mounted and int(device.get("disc-max") or 0) > 0
             suitable |= walk(device.get("children", []), crypt)
@@ -91,7 +104,7 @@ def check_discard_support(runner: Native) -> bool:
 
     devices = data.get("blockdevices", [])
     if not walk(devices):
-        raise Conflict("no mounted discard-capable device was found")
+        raise Conflict("lsblk found no mounted discard-capable device")
     return True
 
 
@@ -109,11 +122,14 @@ def ensure_subordinate_range(
     uid: int | None = None,
     gid: int | None = None,
 ) -> None:
-    """Ensure a user has an allocated range in /etc/subuid or /etc/subgid without overlaps."""
-    from .io import atomic_write, read_managed
+    """Give `user` the `desired` range in a subuid or subgid file.
 
-    p = Path(path)
-    lines = read_managed(p).splitlines() if p.exists() else []
+    Raise `Conflict` if the range overlaps another user's or the file is
+    malformed, and as `atomic_write` does. Ownership defaults to the effective
+    user and group.
+    """
+    file = Path(path)
+    lines = read_managed(file).splitlines() if file.exists() else []
     user_indices: list[int] = []
     for index, line in enumerate(lines):
         stripped = line.strip()
@@ -121,7 +137,7 @@ def ensure_subordinate_range(
             continue
         fields = stripped.split(":")
         if len(fields) != 3 or not fields[1].isdigit() or not fields[2].isdigit():
-            raise Conflict(f"invalid subordinate ID allocation in {p}")
+            raise Conflict(f"invalid subordinate ID allocation in {file}")
         existing_user, start_text, count_text = fields
         if existing_user == user:
             user_indices.append(index)
@@ -129,11 +145,13 @@ def ensure_subordinate_range(
         existing = {"start": int(start_text), "count": int(count_text)}
         if ranges_overlap(desired, existing):
             raise Conflict(
-                f"desired subordinate ID range for {user} overlaps {existing_user} in {p}"
+                f"desired subordinate ID range for {user} overlaps {existing_user} in {file}"
             )
 
     if len(user_indices) > 1:
-        raise Conflict(f"multiple subordinate ID allocations exist for {user} in {p}")
+        raise Conflict(
+            f"multiple subordinate ID allocations exist for {user} in {file}"
+        )
     desired_line = f"{user}:{desired['start']}:{desired['count']}"
     if user_indices:
         lines[user_indices[0]] = desired_line
@@ -141,4 +159,6 @@ def ensure_subordinate_range(
         lines.append(desired_line)
     target_uid = os.geteuid() if uid is None else uid
     target_gid = os.getegid() if gid is None else gid
-    atomic_write(p, "\n".join(lines) + "\n", mode=0o644, uid=target_uid, gid=target_gid)
+    atomic_write(
+        file, "\n".join(lines) + "\n", mode=0o644, uid=target_uid, gid=target_gid
+    )

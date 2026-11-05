@@ -11,7 +11,8 @@ def validate[T](schema: type[T], data: Any, name: str = "manifest") -> T:
     """Return `data` typed as `schema` if its top-level keys match exactly.
 
     A missing or unknown key means Nix and the adapter disagree about the
-    manifest, so deployment stops before reading any value.
+    manifest, so deployment stops before reading any value: raise `Conflict`
+    naming each such key, or if `data` is not an object.
     """
     if not isinstance(data, dict):
         raise Conflict(f"{name} is not a JSON object")

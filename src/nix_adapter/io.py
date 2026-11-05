@@ -56,6 +56,11 @@ def directory_fd(path: Path, *, create: bool = False):
 
 @contextmanager
 def regular_file(parent: int, name: str):
+    """Open `name` under the directory descriptor `parent` without following
+    symlinks; yield the stream and its status.
+
+    Raise `Conflict` unless it is a regular file with one link.
+    """
     fd = os.open(
         name, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=parent
     )
@@ -70,6 +75,7 @@ def regular_file(parent: int, name: str):
 
 
 def read_managed(path: Path) -> str:
+    """The text of `path`, read without following symlinks, or an empty string."""
     try:
         with (
             directory_fd(path.parent) as parent,
@@ -81,6 +87,11 @@ def read_managed(path: Path) -> str:
 
 
 def ensure_directory(path: Path, *, mode: int, uid: int, gid: int) -> None:
+    """Create `path` if needed and give it `mode`, `uid` and `gid`.
+
+    Raise `Conflict` if a path component is not a directory or cannot be
+    created, or if the directory belongs to another user.
+    """
     with directory_fd(path, create=True) as fd:
         info = os.fstat(fd)
         if info.st_uid not in (os.geteuid(), uid) and os.geteuid() != 0:
@@ -95,6 +106,10 @@ def ensure_directory(path: Path, *, mode: int, uid: int, gid: int) -> None:
 def remove_managed_file(
     path: Path, before_change: Callable[[], None] | None = None
 ) -> bool:
+    """Remove the regular file `path`; return whether it existed.
+
+    `before_change` runs just before the removal.
+    """
     try:
         with directory_fd(path.parent) as parent:
             with regular_file(parent, path.name):
@@ -117,6 +132,11 @@ def atomic_write(
     gid: int = 0,
     before_change: Callable[[], None] | None = None,
 ) -> bool:
+    """Replace `path` atomically with `content`; return whether it changed.
+
+    `before_change` runs just before the first mutation. Raise `Conflict`
+    if the existing file has an unexpected owner, type or link count.
+    """
     with directory_fd(path.parent, create=True) as parent:
         try:
             with regular_file(parent, path.name) as (stream, current):

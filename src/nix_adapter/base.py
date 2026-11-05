@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, ClassVar, cast
@@ -11,7 +12,7 @@ from .exceptions import Conflict
 from .files import Files
 from .native import Native
 from .plan import Change
-from .systemd import Systemd
+from .systemd import UNIT_STATE, Systemd
 
 
 class BaseAdapter[M: Mapping[str, Any] = dict[str, Any]]:
@@ -27,16 +28,15 @@ class BaseAdapter[M: Mapping[str, Any] = dict[str, Any]]:
         self,
         desired: M,
         root: Path | str = Path("/"),
-        runner: Native | None = None,
+        native: Native | None = None,
         files: Files | None = None,
         context: AdapterContext | None = None,
     ):
         self.desired = desired
         self.root = Path(root)
         self.context = context or AdapterContext()
-        self.runner = runner or self.context.native()
         self.files = self._files(files)
-        self.systemd = Systemd(self.runner)
+        self.native = native or self.context.native()
         self.updates: int = 0
         self.actions: int = 0
 
@@ -51,32 +51,31 @@ class BaseAdapter[M: Mapping[str, Any] = dict[str, Any]]:
 
     @property
     def native(self) -> Native:
-        """Backwards-compatibility alias for self.runner."""
-        return self.runner
+        """The command runner; assigning one also rebuilds `systemd` on it."""
+        return self._native
 
     @native.setter
     def native(self, value: Native) -> None:
-        self.runner = value
-        self.systemd = Systemd(self.runner)
+        self._native = value
+        self.systemd = Systemd(value)
 
-    def run(self, *args: Any, **kwargs: Any) -> Any:
-        return self.runner.run(*args, **kwargs)
+    def run(self, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+        """Run a native command through this adapter's runner.
+
+        Raise `Conflict` as `Native.run` does.
+        """
+        return self.native.run(*args, check=check)
 
     def unit(self, name: str) -> dict[str, str]:
-        """Inspect unit state properties."""
-        return self.systemd.show(
-            name, properties=["LoadState", "ActiveState", "UnitFileState"]
-        )
+        """The load, active and unit-file state of unit `name`.
+
+        Raise `Conflict` if `systemctl show` fails.
+        """
+        return self.systemd.show(name, properties=UNIT_STATE)
 
     def ready_unit(self, name: str) -> dict[str, str]:
-        """Verify that a unit is loaded and not masked."""
-        state = self.unit(name)
-        if state.get("LoadState") != "loaded" or state.get("UnitFileState") in (
-            "masked",
-            "masked-runtime",
-        ):
-            raise Conflict(f"required system unit is missing or masked: {name}")
-        return state
+        """The state of unit `name`; raise `Conflict` if it is missing or masked."""
+        return self.systemd.ready_unit(name)
 
     def converge_unit(
         self,
@@ -88,7 +87,8 @@ class BaseAdapter[M: Mapping[str, Any] = dict[str, Any]]:
         """Keep a loaded unit enabled and active; restart it when asked.
 
         `before_change` runs before each mutation, so callers can record a
-        pending marker. The unit must end enabled and active, or this fails.
+        pending marker. Raise `Conflict` if the unit is missing or masked, or
+        does not end enabled and active.
         """
         state = self.ready_unit(name)
         if state.get("UnitFileState") != "enabled":
@@ -116,7 +116,10 @@ class BaseAdapter[M: Mapping[str, Any] = dict[str, Any]]:
         return []
 
     def plan_file(self, name: str, text: str) -> Change:
-        """Compare a managed file with its declared content, ownership and mode."""
+        """Compare a managed file with its declared content, ownership and mode.
+
+        Raise `Conflict` as `Files.read` does.
+        """
         if not self.files.path(name).exists():
             return Change("+", name)
         if self.files.read(name) != text:
@@ -126,7 +129,10 @@ class BaseAdapter[M: Mapping[str, Any] = dict[str, Any]]:
         return Change("=", name)
 
     def plan_unit(self, name: str) -> list[Change]:
-        """Judge a unit as converge_unit does, so the plan matches the deployment."""
+        """Judge a unit as `converge_unit` does, so the plan matches the deployment.
+
+        Raise `Conflict` as `ready_unit` does.
+        """
         state = self.ready_unit(name)
         enabled = state.get("UnitFileState") == "enabled"
         active = state.get("ActiveState") == "active"
@@ -138,7 +144,12 @@ class BaseAdapter[M: Mapping[str, Any] = dict[str, Any]]:
         return changes or [Change("=", name)]
 
     def path_str(self, key: str, default: str | None = None) -> str:
-        """Resolve a declared path string, checking paths dictionary or direct keys."""
+        """The host path that manifest key `key` declares.
+
+        The key is looked up in the manifest's `paths` table if it has one,
+        else at the top level; `default` applies when it is absent. Raise
+        `Conflict` unless the value is an absolute path without `..`.
+        """
         paths: object = self.desired.get("paths")
         if isinstance(paths, dict):
             value = cast("dict[str, object]", paths).get(key)
@@ -155,14 +166,18 @@ class BaseAdapter[M: Mapping[str, Any] = dict[str, Any]]:
         return value
 
     def path(self, key: str, default: str | None = None) -> Path:
-        """Resolve a declared path relative to root, checking paths dictionary or direct keys."""
+        """`path_str(key, default)` as a path under `root`; raise as `path_str` does."""
         raw = self.path_str(key, default)
         return self.root / raw.lstrip("/")
 
     def write(
         self, path: str | Path, text: str, action: str, mode: int = 0o644
     ) -> bool:
-        """Write managed configuration atomically and record updates and pending state."""
+        """Replace `path` with `text` if it differs; return whether it changed.
+
+        The pending marker for `action` is recorded before the write, so the
+        adapter needs a `pending_template`; without one this raises `Conflict`.
+        """
         p_str = str(path)
         if not self.files.matches(p_str, text, mode=mode):
             self.files.mark(action)
@@ -171,8 +186,8 @@ class BaseAdapter[M: Mapping[str, Any] = dict[str, Any]]:
             return changed
         return False
 
-    def preflight(self, installed: bool = False) -> bool | None:
-        """Validate prerequisites before convergence."""
+    def preflight(self) -> bool | None:
+        """Check prerequisites; adapters override this. `False` means not ready."""
         return None
 
     def converge(self) -> None:

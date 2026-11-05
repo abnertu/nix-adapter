@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .native import Native
+from .native import DEFAULT_TIMEOUT, Native
 
 
 @dataclass(frozen=True)
@@ -18,6 +18,6 @@ class AdapterContext:
     verbose: bool = False
     color: bool = False
 
-    def native(self, *, timeout: int = 300) -> Native:
+    def native(self, *, timeout: int = DEFAULT_TIMEOUT) -> Native:
         """A command runner that honors this invocation's verbosity."""
         return Native(verbose=self.verbose, timeout=timeout)

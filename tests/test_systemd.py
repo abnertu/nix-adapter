@@ -10,7 +10,7 @@ from nix_adapter.systemd import Systemd
 class SystemdTests(unittest.TestCase):
     def setUp(self):
         self.runner = MagicMock()
-        self.systemd = Systemd(runner=self.runner)
+        self.systemd = Systemd(native=self.runner)
 
     def test_show_parses_properties(self):
         res = MagicMock()
@@ -22,7 +22,11 @@ class SystemdTests(unittest.TestCase):
         self.assertEqual(props["ActiveState"], "active")
         self.assertEqual(props["UnitFileState"], "enabled")
         self.runner.run.assert_called_with(
-            "systemctl", "show", "caddy.service", "--property=LoadState,ActiveState"
+            "systemctl",
+            "show",
+            "caddy.service",
+            "--property=LoadState,ActiveState",
+            check=True,
         )
 
     def test_ready_unit_raises_on_masked(self):
@@ -43,10 +47,10 @@ class SystemdTests(unittest.TestCase):
         self.assertFalse(self.systemd.is_active("caddy.service"))
 
     def test_user_mode(self):
-        user_sd = Systemd(runner=self.runner, user=True)
+        user_sd = Systemd(native=self.runner, user=True)
         user_sd.restart("user-task.service")
         self.runner.run.assert_called_with(
-            "systemctl", "--user", "restart", "user-task.service"
+            "systemctl", "--user", "restart", "user-task.service", check=True
         )
 
 

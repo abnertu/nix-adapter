@@ -22,15 +22,20 @@ class BaseServiceAdapter[M: Mapping[str, Any] = dict[str, Any]](BaseAdapter[M]):
         self,
         desired: M,
         root: Path | str = Path("/"),
-        runner: Native | None = None,
+        native: Native | None = None,
         files: Files | None = None,
         context: AdapterContext | None = None,
     ):
         super().__init__(
-            desired=desired, root=root, runner=runner, files=files, context=context
+            desired=desired, root=root, native=native, files=files, context=context
         )
 
     def validate_file(self, key: str, mode_mask: int = 0o022) -> Path:
+        """The checked path of manifest key `key`.
+
+        Raise `Conflict` unless it is a single-link regular file, root-owned
+        on the host, with none of the `mode_mask` permission bits.
+        """
         path = self.path(key)
         if path.is_symlink() or not path.is_file():
             raise Conflict(f"path {key} must be a regular file")
@@ -49,7 +54,12 @@ class BaseServiceAdapter[M: Mapping[str, Any] = dict[str, Any]](BaseAdapter[M]):
         pending: Path,
         mode: int = 0o644,
     ) -> bool:
-        """Write a systemd unit file atomically with receipt checking."""
+        """Install `unit` at `path`; return whether it changed.
+
+        `pending` is touched before the write. Raise `Conflict` if `unit` is
+        not text, if `path` is not a single-link regular file, or if an
+        existing different unit has no `receipt`, so it was never adopted.
+        """
         if not isinstance(unit, str):
             raise Conflict(f"unit content for {path} is not text")
         if path.exists() and (
@@ -75,15 +85,19 @@ class BaseServiceAdapter[M: Mapping[str, Any] = dict[str, Any]](BaseAdapter[M]):
         return True
 
     def ensure_metadata(self, path: Path, user: str, group: str, mode: int) -> None:
-        """Ensure file or directory ownership and permissions."""
+        """Give `path` the owner `user:group` and `mode`.
+
+        Raise `OSError` if `path` cannot be stat'ed, and `Conflict` as
+        `Native.run` does when the `stat`, `chown` or `chmod` command fails.
+        """
         info = path.stat()
         desired = f"{user}:{group}"
         if self.root == Path("/"):
-            current = self.runner.run("stat", "-c", "%U:%G", str(path)).stdout.strip()
+            current = self.native.run("stat", "-c", "%U:%G", str(path)).stdout.strip()
             if current != desired:
-                self.runner.run("chown", desired, str(path))
+                self.native.run("chown", desired, str(path))
         if stat.S_IMODE(info.st_mode) != mode:
-            self.runner.run("chmod", f"{mode:04o}", str(path))
+            self.native.run("chmod", f"{mode:04o}", str(path))
 
     def ensure_system_account(
         self,
@@ -93,12 +107,17 @@ class BaseServiceAdapter[M: Mapping[str, Any] = dict[str, Any]](BaseAdapter[M]):
         shell: str = "/usr/bin/nologin",
         create: bool = True,
     ) -> None:
-        """Idempotently verify or create a dedicated system account and group."""
+        """Verify the system account `username`, or create it if `create`.
+
+        The account must have its own group (`group`, default the user name),
+        home `home` (default `/var/lib/<username>`) and `shell`. Raise
+        `Conflict` if an existing account differs in any of them.
+        """
         group_name = group or username
         home_dir = home or f"/var/lib/{username}"
 
-        group_res = self.runner.run("getent", "group", group_name, check=False)
-        user_res = self.runner.run("getent", "passwd", username, check=False)
+        group_res = self.native.run("getent", "group", group_name, check=False)
+        user_res = self.native.run("getent", "passwd", username, check=False)
 
         if user_res.returncode == 0:
             if group_res.returncode != 0:
@@ -106,7 +125,7 @@ class BaseServiceAdapter[M: Mapping[str, Any] = dict[str, Any]](BaseAdapter[M]):
             fields = user_res.stdout.strip().split(":")
             if len(fields) != 7 or fields[5:] != [home_dir, shell]:
                 raise Conflict(f"existing account {username} has conflicting identity")
-            primary = self.runner.run("id", "-gn", username).stdout.strip()
+            primary = self.native.run("id", "-gn", username).stdout.strip()
             if primary != group_name:
                 raise Conflict(
                     f"existing account {username} has conflicting primary group"
@@ -117,9 +136,9 @@ class BaseServiceAdapter[M: Mapping[str, Any] = dict[str, Any]](BaseAdapter[M]):
             return
 
         if group_res.returncode != 0:
-            self.runner.run("groupadd", "--system", group_name)
+            self.native.run("groupadd", "--system", group_name)
 
-        self.runner.run(
+        self.native.run(
             "useradd",
             "--system",
             "--gid",

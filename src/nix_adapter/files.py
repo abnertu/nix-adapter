@@ -11,7 +11,8 @@ from pathlib import Path
 
 from .exceptions import Conflict
 
-ASSIGNMENT = re.compile(r"\s*([A-Z][A-Z0-9_]*)\s*=\s*(.*?)\s*")
+KEY = r"[A-Z][A-Z0-9_]*"
+ASSIGNMENT = re.compile(rf"\s*({KEY})\s*=\s*(.*?)\s*")
 SHELL_EXPANSION = ("$", "`", "\\")
 
 
@@ -45,12 +46,13 @@ def replace_keys(text: str, desired: dict[str, str], *, source: str) -> str:
     """Set the `desired` keys of an environment-style file and keep all else.
 
     Existing assignments are replaced in place; missing keys are appended.
+    Raise `Conflict` as `assignments` does if any line is invalid.
     """
     assignments(text, source=source)  # Validate unowned lines too.
     remaining = dict(desired)
     lines: list[str] = []
     for line in text.splitlines(keepends=True):
-        match = re.match(r"\s*([A-Z][A-Z0-9_]*)\s*=", line)
+        match = re.match(rf"\s*({KEY})\s*=", line)
         if match and match[1] in desired:
             key = match[1]
             lines.append(f"{key}={shlex.quote(remaining.pop(key))}\n")
@@ -70,7 +72,9 @@ def locale_gen(text: str, locales: list[str], *, block: str, source: str) -> str
     """Add locales to a locale.gen text inside the managed block named `block`.
 
     The block is delimited by `# BEGIN <block>` and `# END <block>`; entries
-    outside it are validated and kept as the operator wrote them.
+    outside it are validated and kept as the operator wrote them. Raise
+    `Conflict` on a duplicate, unmatched or unterminated block, or an entry
+    that is not `<locale> <charset>`.
     """
     begin, end = f"# BEGIN {block}", f"# END {block}"
     outside: list[str] = []
@@ -106,7 +110,11 @@ def locale_gen(text: str, locales: list[str], *, block: str, source: str) -> str
 
 
 def ini(text: str, *, source: str) -> dict[tuple[str, str], str]:
-    """Parse a systemd-style INI file into `(section, key)` pairs."""
+    """Parse a systemd-style INI file into `(section, key)` pairs.
+
+    Raise `Conflict` on a duplicate key, a key outside a section, or a
+    continuation line.
+    """
     section: str | None = None
     result: dict[tuple[str, str], str] = {}
     for line in text.splitlines():
@@ -129,6 +137,8 @@ def ini(text: str, *, source: str) -> dict[tuple[str, str], str]:
 
 
 TEMPORARY_PREFIX = ".nix-adapter."
+SYSTEMD_BASES = ("/usr/lib", "/usr/local/lib", "/run", "/etc")
+"""Where systemd reads configuration, from vendor (lowest) to admin (highest)."""
 
 
 class Files:
@@ -154,14 +164,23 @@ class Files:
         self.pending_template = pending_template
 
     def with_pending_template(self, template: str) -> Files:
-        """A copy of these files that uses `template` for pending markers."""
-        return Files(self.root, self.identity, pending_template=template)
+        """A copy of these files that uses `template` for pending markers.
+
+        Raise `Conflict` if `template` lacks `{action}`.
+        """
+        return type(self)(self.root, self.identity, pending_template=template)
 
     def system_name(self, path: Path) -> str:
         """The host path that a root-relative path stands for, for diagnostics."""
         return "/" + str(path.relative_to(self.root))
 
     def path(self, name: str, symlink_leaf: bool = False) -> Path:
+        """The checked path under `root` for host path `name`.
+
+        Raise `Conflict` on traversal, a symlink in the path (the leaf only if
+        `symlink_leaf`), or an unsafe ancestor: not a directory, not owned by this
+        identity, or writable by group or others.
+        """
         relative = Path(name)
         if not relative.is_absolute() or ".." in relative.parts:
             raise Conflict(f"invalid private system path: {name}")
@@ -188,6 +207,11 @@ class Files:
         return path
 
     def read(self, name: str) -> str:
+        """The text of `name`, or an empty string if it does not exist.
+
+        Raise `Conflict` if the path is unsafe (see `path`), not a regular
+        file, or not valid text.
+        """
         path = self.path(name)
         if not path.exists():
             return ""
@@ -199,6 +223,10 @@ class Files:
             raise Conflict(f"configuration is not valid text: {name}") from None
 
     def matches(self, name: str, text: str, mode: int = 0o644) -> bool:
+        """Whether `name` holds `text` with `mode` and this identity.
+
+        Raise `Conflict` as `read` does.
+        """
         old = self.read(name)
         path = self.path(name)
         if not path.exists():
@@ -211,6 +239,10 @@ class Files:
         )
 
     def write(self, name: str, text: str, mode: int = 0o644) -> bool:
+        """Replace `name` atomically with `text`; return whether it changed.
+
+        Raise `Conflict` as `read` does.
+        """
         if self.matches(name, text, mode):
             return False
         path = self.path(name)
@@ -233,6 +265,7 @@ class Files:
 
     @staticmethod
     def sync_dir(path: Path) -> None:
+        """Flush the directory entry changes of `path` to disk."""
         descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
         try:
             os.fsync(descriptor)
@@ -240,6 +273,10 @@ class Files:
             os.close(descriptor)
 
     def zone_exists(self, name: str) -> bool:
+        """Whether `name` is a timezone in the host zoneinfo database.
+
+        Raise `Conflict` if `name` resolves outside that database.
+        """
         base = self.path("/usr/share/zoneinfo")
         candidate = base / name
         resolved = candidate.resolve()
@@ -248,6 +285,10 @@ class Files:
         return resolved.is_file()
 
     def metadata_matches(self, name: str, symlink: bool = False) -> bool:
+        """Whether `name` has this identity (and mode 0644 unless `symlink`).
+
+        Raise `Conflict` as `path` does.
+        """
         path = self.path(name, symlink_leaf=symlink)
         if not path.exists() and not path.is_symlink():
             return False
@@ -257,6 +298,10 @@ class Files:
         )
 
     def repair_metadata(self, name: str, symlink: bool = False) -> bool:
+        """Restore the identity and mode of `name`; return whether it changed.
+
+        Raise `Conflict` as `path` does.
+        """
         path = self.path(name, symlink_leaf=symlink)
         if not self.metadata_matches(name, symlink):
             os.chown(path, *self.identity, follow_symlinks=False)
@@ -267,20 +312,27 @@ class Files:
         return False
 
     def marker(self, action: str) -> str:
-        """The host path of the pending marker for `action`."""
+        """The host path of the pending marker for `action`.
+
+        Raise `Conflict` if these files have no `pending_template`. The other
+        marker methods raise the same way, and also as `path` does.
+        """
         if self.pending_template is None:
             raise Conflict(f"no pending marker template for action {action}")
         return self.pending_template.format(action=action)
 
     def pending(self, action: str) -> bool:
+        """Whether the pending marker for `action` exists."""
         name = self.marker(action)
         self.read(name)
         return self.path(name).exists()
 
     def mark(self, action: str, value: str = "pending\n") -> None:
+        """Record that `action` has started but not finished."""
         self.write(self.marker(action), value, 0o600)
 
     def clear(self, action: str) -> None:
+        """Remove the pending marker for `action`."""
         path = self.path(self.marker(action))
         if path.exists():
             path.unlink()
@@ -290,45 +342,58 @@ class Files:
         """Check that `text` can own `/etc/systemd/<name>.conf.d/<file_name>`.
 
         Every other configuration source that systemd reads for `name` must
-        agree with the declared values; the target path is returned.
+        agree with the declared values; the target path is returned. Raise
+        `Conflict` on a disagreeing source, naming it and each value; on a
+        source that `ini` rejects; or on an unsafe target path.
         """
         target = f"/etc/systemd/{name}.conf.d/{file_name}"
         desired = ini(text, source=f"declared {name} configuration")
-        # Respect systemd's basename precedence across vendor/runtime/admin files.
-        bases = ["/usr/lib", "/usr/local/lib", "/run", "/etc"]
+        self.read(target)  # Validate the target path before trusting others.
+        for source in self.systemd_sources(name):
+            if source != target and not self._masked(source):
+                self._check_agreement(name, source, desired)
+        return target
+
+    def systemd_sources(self, name: str) -> list[str]:
+        """The host paths systemd reads for `<name>.conf`, lowest priority first.
+
+        The main file comes from the highest-priority base that has one. Then
+        come the drop-ins, ordered by basename; a basename in a later base
+        replaces the same basename in an earlier one. Raise `Conflict` as
+        `path` does for any of these directories.
+        """
         main = next(
             (
                 f"{base}/systemd/{name}.conf"
-                for base in reversed(bases)
+                for base in reversed(SYSTEMD_BASES)
                 if self.path(f"{base}/systemd/{name}.conf").exists()
             ),
             None,
         )
-        candidates: dict[str, str] = {}
-        for base in bases:
+        dropins: dict[str, str] = {}
+        for base in SYSTEMD_BASES:
             directory = self.path(f"{base}/systemd/{name}.conf.d")
             if directory.exists():
                 for path in directory.glob("*.conf"):
-                    candidates[path.name] = "/" + str(path.relative_to(self.root))
-        sources = ([main] if main else []) + [
-            candidates[key] for key in sorted(candidates)
+                    dropins[path.name] = self.system_name(path)
+        return ([main] if main else []) + [dropins[key] for key in sorted(dropins)]
+
+    def _masked(self, source: str) -> bool:
+        path = self.path(source, symlink_leaf=True)
+        return path.is_symlink() and os.readlink(path) == "/dev/null"
+
+    def _check_agreement(
+        self, name: str, source: str, desired: dict[tuple[str, str], str]
+    ) -> None:
+        values = ini(self.read(source), source=source)
+        conflicts = [
+            f"[{section}] {key}={values[(section, key)]} (expected: {value})"
+            for (section, key), value in desired.items()
+            if values.get((section, key), value) != value
         ]
-        self.read(target)
-        for source in sources:
-            if source == target:
-                continue
-            path = self.path(source, symlink_leaf=True)
-            if path.is_symlink() and os.readlink(path) == "/dev/null":
-                continue
-            values = ini(self.read(source), source=source)
-            conflicts = [
-                f"[{sec}] {k}={values[(sec, k)]} (expected: {v})"
-                for (sec, k), v in desired.items()
-                if (sec, k) in values and values[(sec, k)] != v
-            ]
-            if conflicts:
-                details = ", ".join(conflicts)
-                raise Conflict(
-                    f"conflicting {name} configuration in {source} ({details}); review other overrides"
-                )
-        return target
+        if conflicts:
+            details = ", ".join(conflicts)
+            raise Conflict(
+                f"conflicting {name} configuration in {source} ({details}); "
+                "review other overrides"
+            )

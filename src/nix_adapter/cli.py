@@ -78,7 +78,11 @@ class Invocation:
 def parse_invocation(
     args: Sequence[str], name: str, *, require_root: bool
 ) -> Invocation:
-    """Validate `MANIFEST PHASE [FLAGS]`; raise `Conflict` on anything else."""
+    """Validate `MANIFEST PHASE [FLAGS]`.
+
+    Raise `Conflict` on any other shape, or if `require_root` is set and the
+    process is not root.
+    """
     flags = list(args[2:])
     valid = (
         len(args) >= 2
@@ -95,7 +99,11 @@ def parse_invocation(
 
 
 def load_manifest(path: Path, name: str) -> Mapping[str, object]:
-    """Read a manifest file that holds one JSON object."""
+    """Read a manifest file that holds one JSON object.
+
+    Raise `Conflict` if its top level is not an object; JSON syntax errors
+    raise `ValueError`.
+    """
     manifest: object = json.loads(path.read_text())
     if not isinstance(manifest, dict):
         raise Conflict(f"{name} manifest {path} is not a JSON object")
@@ -116,16 +124,16 @@ def phase_runner(
         case "preflight":
             return lambda: preflight_status(adapter.preflight(), allow_skip=allow_skip)
         case "converge":
-            return succeed(adapter.converge)
+            return exit_zero_after(adapter.converge)
         case "purge" if isinstance(adapter, Purgeable):
-            return succeed(adapter.purge)
+            return exit_zero_after(adapter.purge)
         case phase if isinstance(adapter, ExtraPhases) and phase in adapter.phases:
-            return succeed(adapter.phases[phase])
+            return exit_zero_after(adapter.phases[phase])
         case phase:
             raise Conflict(f"{name} adapter does not support {phase}")
 
 
-def succeed(action: Callable[[], None]) -> Callable[[], int]:
+def exit_zero_after(action: Callable[[], None]) -> Callable[[], int]:
     """Wrap a phase that reports failure only by raising."""
 
     def run() -> int:

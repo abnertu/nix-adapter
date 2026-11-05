@@ -15,6 +15,8 @@ from .exceptions import Conflict
 COMMAND_DIRECTORY = "/usr/bin/"
 COMMAND_ENVIRONMENT = {"PATH": "/usr/bin", "LC_ALL": "C"}
 REDACTED = "<redacted>"
+DEFAULT_TIMEOUT = 300
+"""Seconds a native command may run before it is killed."""
 
 
 class Native:
@@ -32,7 +34,7 @@ class Native:
         self,
         *,
         verbose: bool = False,
-        timeout: int = 300,
+        timeout: int = DEFAULT_TIMEOUT,
         redact: Sequence[str] = (),
     ):
         if any(not value for value in redact):
@@ -58,6 +60,7 @@ class Native:
         return text
 
     def available(self, command: str) -> bool:
+        """Whether `/usr/bin/<command>` exists and is executable."""
         return os.access(COMMAND_DIRECTORY + command, os.X_OK)
 
     def run(self, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -104,7 +107,8 @@ class Native:
         return shlex.join(self.redact(argument) for argument in argv)
 
     def _print(self, stream: TextIO, text: str) -> None:
-        stream.write(self.redact(text))
+        text = self.redact(text)
+        stream.write(text)
         if not text.endswith("\n"):
             stream.write("\n")
         stream.flush()

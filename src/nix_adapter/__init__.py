@@ -17,10 +17,10 @@ from .io import (
 from .lock import operation_lock
 from .manifest import validate
 from .native import Native
-from .plan import Change, render
+from .plan import STYLES, Change, render
 from .progress import Progress, Task
 from .service import BaseServiceAdapter
-from .system import ensure_subordinate_range
+from .system import ensure_subordinate_range, ranges_overlap
 from .systemd import Systemd
 from .testing import FakeNative, FakeProcess
 from .toml import dump_toml, parse_toml
@@ -28,6 +28,7 @@ from .toml import dump_toml, parse_toml
 __version__ = version("nix_adapter")
 
 __all__ = [
+    "STYLES",
     "Adapter",
     "AdapterContext",
     "BaseAdapter",
@@ -53,6 +54,7 @@ __all__ = [
     "locale_gen",
     "operation_lock",
     "parse_toml",
+    "ranges_overlap",
     "read_managed",
     "regular_file",
     "remove_managed_file",

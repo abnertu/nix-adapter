@@ -14,73 +14,65 @@ def _format_key(key: str) -> str:
     return f'"{escaped}"'
 
 
+STRING_ESCAPES = {"\\": "\\\\", '"': '\\"', "\n": "\\n", "\r": "\\r", "\t": "\\t"}
+
+
 def _dump_value(val: Any) -> str:
-    if isinstance(val, bool):
-        return "true" if val else "false"
-    elif isinstance(val, int):
-        return str(val)
-    elif isinstance(val, float):
-        s = str(val)
-        return s if ("." in s or "e" in s.lower()) else f"{s}.0"
-    elif isinstance(val, str):
-        escaped = (
-            val.replace("\\", "\\\\")
-            .replace('"', '\\"')
-            .replace("\n", "\\n")
-            .replace("\r", "\\r")
-            .replace("\t", "\\t")
-        )
-        return f'"{escaped}"'
-    elif isinstance(val, list):
-        items = [_dump_value(x) for x in cast("list[Any]", val)]
-        return f"[{', '.join(items)}]"
-    elif isinstance(val, dict):
-        items = [
-            f"{_format_key(k)} = {_dump_value(v)}"
-            for k, v in cast("dict[str, Any]", val).items()
-        ]
-        return f"{{{', '.join(items)}}}"
-    raise TypeError(f"Unsupported TOML value type: {type(val)}")
+    match val:
+        case bool():
+            return "true" if val else "false"
+        case int():
+            return str(val)
+        case float():
+            text = str(val)
+            return text if ("." in text or "e" in text.lower()) else f"{text}.0"
+        case str():
+            return '"' + "".join(STRING_ESCAPES.get(char, char) for char in val) + '"'
+        case list():
+            items = [_dump_value(item) for item in cast("list[Any]", val)]
+            return f"[{', '.join(items)}]"
+        case dict():
+            pairs = cast("dict[str, Any]", val).items()
+            items = [
+                f"{_format_key(key)} = {_dump_value(value)}" for key, value in pairs
+            ]
+            return f"{{{', '.join(items)}}}"
+        case _:
+            raise TypeError(f"Unsupported TOML value type: {type(val)}")
 
 
 def _is_table_array(val: Any) -> bool:
-    return (
-        isinstance(val, list)
-        and len(cast("list[Any]", val)) > 0
-        and all(isinstance(x, dict) for x in cast("list[Any]", val))
-    )
+    items = cast("list[Any]", val) if isinstance(val, list) else []
+    return bool(items) and all(isinstance(item, dict) for item in items)
+
+
+def _header(path: list[str], *, array: bool) -> str:
+    dotted = ".".join(_format_key(part) for part in path)
+    return f"[[{dotted}]]" if array else f"[{dotted}]"
+
+
+def _open_section(lines: list[str], header: str) -> None:
+    if lines and lines[-1] != "":
+        lines.append("")
+    lines.append(header)
 
 
 def _dump_table(data: dict[str, Any], path: list[str]) -> list[str]:
-    lines: list[str] = []
-
-    # 1. Primitives & non-table lists
-    for k, v in data.items():
-        if isinstance(v, dict) or _is_table_array(v):
-            continue
-        lines.append(f"{_format_key(k)} = {_dump_value(v)}")
-
-    # 2. Sub-tables
-    for k, v in data.items():
-        if isinstance(v, dict):
-            new_path = [*path, k]
-            header = f"[{'.'.join(_format_key(p) for p in new_path)}]"
-            if lines and lines[-1] != "":
-                lines.append("")
-            lines.append(header)
-            lines.extend(_dump_table(cast("dict[str, Any]", v), new_path))
-
-    # 3. Array of tables
-    for k, v in data.items():
-        if _is_table_array(v):
-            new_path = [*path, k]
-            header = f"[[{'.'.join(_format_key(p) for p in new_path)}]]"
-            for item in v:
-                if lines and lines[-1] != "":
-                    lines.append("")
-                lines.append(header)
-                lines.extend(_dump_table(item, new_path))
-
+    """Plain keys first, then sub-tables, then arrays of tables."""
+    lines = [
+        f"{_format_key(key)} = {_dump_value(value)}"
+        for key, value in data.items()
+        if not isinstance(value, dict) and not _is_table_array(value)
+    ]
+    for key, value in data.items():
+        if isinstance(value, dict):
+            _open_section(lines, _header([*path, key], array=False))
+            lines += _dump_table(cast("dict[str, Any]", value), [*path, key])
+    for key, value in data.items():
+        if _is_table_array(value):
+            for item in cast("list[dict[str, Any]]", value):
+                _open_section(lines, _header([*path, key], array=True))
+                lines += _dump_table(item, [*path, key])
     return lines
 
 

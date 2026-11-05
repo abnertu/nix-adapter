@@ -35,6 +35,7 @@ class FakeNative(Native):
                     self.responses[k] = v
 
     def available(self, command: str) -> bool:
+        """Whether `command` is in `available_commands` (all are when it is empty)."""
         if not self.available_commands:
             return True
         return command in self.available_commands
@@ -48,6 +49,10 @@ class FakeNative(Native):
         allow_failure: bool = False,
         **kwargs: Any,
     ) -> FakeProcess:
+        """Record `argv` and return its configured response.
+
+        Unlike `Native`, a failing response raises `CalledProcessError`.
+        """
         self.calls.append(argv)
         cmd = tuple(argv)
         res = self.responses.get(cmd, FakeProcess())

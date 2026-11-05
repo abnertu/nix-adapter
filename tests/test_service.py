@@ -70,7 +70,7 @@ class ServiceAdapterTests(unittest.TestCase):
         mock_runner = MagicMock()
         mock_runner.run.return_value.returncode = 1  # user and group don't exist
 
-        adapter = BaseServiceAdapter(desired={}, runner=mock_runner)
+        adapter = BaseServiceAdapter(desired={}, native=mock_runner)
         adapter.ensure_system_account("mysvc", create=True)
 
         mock_runner.run.assert_any_call("groupadd", "--system", "mysvc")
@@ -102,7 +102,6 @@ class ServiceAdapterTests(unittest.TestCase):
             adapter = MarkerAdapter(desired={"foo": "bar"}, root=root, files=files)
             self.assertEqual(adapter.desired, {"foo": "bar"})
             self.assertEqual(adapter.root, root)
-            self.assertIs(adapter.native, adapter.runner)
 
             # Test write helper
             written = adapter.write("/etc/sample.conf", "content\n", "sample")
@@ -119,7 +118,7 @@ class ServiceAdapterTests(unittest.TestCase):
             mock_runner = MagicMock()
             adapter.native = mock_runner
             self.assertIs(adapter.native, mock_runner)
-            self.assertIs(adapter.runner, mock_runner)
+            self.assertIs(adapter.systemd.native, mock_runner)
 
             # Preflight and converge default stubs
             self.assertIsNone(adapter.preflight())
