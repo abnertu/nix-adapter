@@ -33,6 +33,3 @@ ignore = ["E501"]
 [tool.ruff.lint.mccabe]
 max-complexity = 10
 
-[tool.ruff.lint.per-file-ignores]
-# Temporary: run_adapter_cli is split in the typed-protocol refactor.
-"src/nix_adapter/cli.py" = ["C901", "PLR0912"]

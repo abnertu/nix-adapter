@@ -3,7 +3,8 @@
 from importlib.metadata import version
 
 from .base import BaseAdapter
-from .cli import run_adapter_cli
+from .cli import Adapter, ExtraPhases, Purgeable, run_adapter_cli
+from .context import AdapterContext
 from .exceptions import Conflict, NotReady
 from .files import Files, assignments, ini, locale_gen, replace_keys
 from .io import (
@@ -27,16 +28,20 @@ from .toml import dump_toml, parse_toml
 __version__ = version("nix_adapter")
 
 __all__ = [
+    "Adapter",
+    "AdapterContext",
     "BaseAdapter",
     "BaseServiceAdapter",
     "Change",
     "Conflict",
+    "ExtraPhases",
     "FakeNative",
     "FakeProcess",
     "Files",
     "Native",
     "NotReady",
     "Progress",
+    "Purgeable",
     "Systemd",
     "Task",
     "assignments",

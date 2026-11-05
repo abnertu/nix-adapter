@@ -19,10 +19,8 @@ class Native:
     prints each command and its complete captured streams.
     """
 
-    def __init__(self, *, verbose: bool | None = None, timeout: int = 300):
-        self.verbose = (
-            os.environ.get("NIX_CONFIG_VERBOSE") == "1" if verbose is None else verbose
-        )
+    def __init__(self, *, verbose: bool = False, timeout: int = 300):
+        self.verbose = verbose
         self.timeout = timeout
 
     def available(self, command: str) -> bool:

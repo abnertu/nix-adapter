@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .base import BaseAdapter
+from .context import AdapterContext
 from .exceptions import Conflict
 from .files import Files
 from .native import Native
@@ -23,8 +24,11 @@ class BaseServiceAdapter[M: Mapping[str, Any] = dict[str, Any]](BaseAdapter[M]):
         root: Path | str = Path("/"),
         runner: Native | None = None,
         files: Files | None = None,
+        context: AdapterContext | None = None,
     ):
-        super().__init__(desired=desired, root=root, runner=runner, files=files)
+        super().__init__(
+            desired=desired, root=root, runner=runner, files=files, context=context
+        )
 
     def validate_file(self, key: str, mode_mask: int = 0o022) -> Path:
         path = self.path(key)

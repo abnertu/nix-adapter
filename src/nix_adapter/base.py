@@ -6,6 +6,7 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, ClassVar, cast
 
+from .context import AdapterContext
 from .exceptions import Conflict
 from .files import Files
 from .native import Native
@@ -28,10 +29,12 @@ class BaseAdapter[M: Mapping[str, Any] = dict[str, Any]]:
         root: Path | str = Path("/"),
         runner: Native | None = None,
         files: Files | None = None,
+        context: AdapterContext | None = None,
     ):
         self.desired = desired
         self.root = Path(root)
-        self.runner = runner or Native()
+        self.context = context or AdapterContext()
+        self.runner = runner or self.context.native()
         self.files = self._files(files)
         self.systemd = Systemd(self.runner)
         self.updates: int = 0

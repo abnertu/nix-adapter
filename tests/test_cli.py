@@ -14,8 +14,9 @@ from nix_adapter.plan import Change
 
 
 class DummyAdapter:
-    def __init__(self, desired):
+    def __init__(self, desired, context=None):
         self.desired = desired
+        self.context = context
 
     def preflight(self):
         if self.desired.get("not_ready"):
@@ -27,6 +28,9 @@ class DummyAdapter:
     def converge(self):
         if self.desired.get("conflict"):
             raise Conflict("converge conflict")
+
+    def plan(self):
+        return []
 
 
 class CliTests(unittest.TestCase):
@@ -91,9 +95,17 @@ class CliTests(unittest.TestCase):
         code, output = self.run_plan({}, "--color")
         self.assertIn("\033[33m~ changed\033[0m", output)
 
-    def test_extra_phases_run_only_when_declared_and_implemented(self):
+    def test_extra_phases_run_only_when_declared(self):
+        class Undeclared(DummyAdapter):
+            def finish(self):
+                raise AssertionError("an undeclared phase must not run")
+
         class Finishing(DummyAdapter):
             finished = False
+
+            @property
+            def phases(self):
+                return {"finish": self.finish}
 
             def finish(self):
                 Finishing.finished = True
@@ -102,9 +114,9 @@ class CliTests(unittest.TestCase):
             manifest = Path(d) / "manifest.json"
             manifest.write_text(json.dumps({}))
             sys.argv = ["adapter.py", str(manifest), "finish"]
-            with self.assertRaises(Conflict):
-                run_adapter_cli(Finishing, require_root=False)
-            code = run_adapter_cli(Finishing, require_root=False, phases=("finish",))
+            with self.assertRaisesRegex(Conflict, "does not support finish"):
+                run_adapter_cli(Undeclared, require_root=False)
+            code = run_adapter_cli(Finishing, require_root=False)
             self.assertEqual(code, 0)
             self.assertTrue(Finishing.finished)
             sys.argv = ["adapter.py", str(manifest), "converge", "--bogus"]
@@ -137,6 +149,34 @@ class CliTests(unittest.TestCase):
             sys.argv = ["adapter.py", str(manifest), "preflight"]
             code = run_adapter_cli(DummyAdapter, allow_skip=True, require_root=False)
             self.assertEqual(code, 20)
+
+    def test_verbose_flag_reaches_the_adapter_runner(self):
+        from nix_adapter.base import BaseAdapter
+
+        built = []
+
+        def factory(manifest, context):
+            adapter = BaseAdapter(manifest, context=context)
+            built.append(adapter)
+            return adapter
+
+        with tempfile.TemporaryDirectory() as d:
+            manifest = Path(d) / "manifest.json"
+            manifest.write_text(json.dumps({}))
+            for flags, verbose in (([], False), (["--verbose"], True)):
+                argv = [str(manifest), "converge", *flags]
+                self.assertEqual(
+                    run_adapter_cli(factory, argv=argv, require_root=False), 0
+                )
+                self.assertIs(built[-1].runner.verbose, verbose)
+
+    def test_manifest_must_be_a_json_object(self):
+        with tempfile.TemporaryDirectory() as d:
+            manifest = Path(d) / "manifest.json"
+            manifest.write_text("[]")
+            argv = [str(manifest), "converge"]
+            with self.assertRaisesRegex(Conflict, "not a JSON object"):
+                run_adapter_cli(DummyAdapter, argv=argv, require_root=False)
 
 
 if __name__ == "__main__":
