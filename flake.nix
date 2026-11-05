@@ -106,6 +106,8 @@
               pkgs.python3Packages.flit-core
               pkgs.pyright
               pkgs.ruff
+              pkgs.git-cliff
+              pkgs.just
             ];
           };
         }
