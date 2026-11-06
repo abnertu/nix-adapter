@@ -16,10 +16,10 @@ dependencies = [
 Source = "https://github.com/abnertu/nix-adapter"
 
 [tool.pyright]
-include = ["src", "tests"]
+include = ["src", "scripts", "tests"]
 typeCheckingMode = "standard"
 # The library is strict; tests drive it through fakes and stay standard.
-strict = ["src"]
+strict = ["src", "scripts"]
 useLibraryCodeForTypes = true
 
 [tool.ruff]

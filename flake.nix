@@ -29,6 +29,7 @@
             src = ./.;
             format = "pyproject";
             nativeBuildInputs = [ pkgs.python3Packages.flit-core ];
+            nativeCheckInputs = [ pkgs.gitMinimal ];
             propagatedBuildInputs = [
               pkgs.python3Packages.rich
             ];
@@ -68,8 +69,10 @@
             pkgs.runCommand "nix-adapter-source-lint"
               {
                 nativeBuildInputs = [
+                  pkgs.actionlint
                   pkgs.deadnix
                   pkgs.nixfmt
+                  pkgs.shellcheck
                   pkgs.statix
                 ];
               }
@@ -78,6 +81,7 @@
                 statix check .
                 deadnix --fail flake.nix
                 nixfmt --check flake.nix
+                actionlint .github/workflows/*.yml
                 touch "$out"
               '';
 

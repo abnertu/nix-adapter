@@ -100,6 +100,17 @@ Remove the previously ignored `env`, `timeout`, and other keyword arguments from
 Replace `allow_failure=True` with `check=False`.
 Catch `Conflict` instead of `CalledProcessError` for checked fake failures.
 
+## Releases
+
+The release workflow waits for successful `check.yml` validation of the exact tag commit on `main`.
+Missing validation times out after 40 minutes.
+Failed validation blocks publication.
+The gate also requires successful execution of the flake-check step.
+Push the release commit to `main` with its tag.
+Rerun failed validation before retrying publication.
+Use the release workflow's `workflow_dispatch` input to retry an existing tag without moving it.
+Dispatch uses the selected workflow revision's tooling and validates the requested tag's commit.
+
 ## Ownership
 
 nix-adapter does the mechanics: safe file replacement, command execution, diagnostics, plan output and the CLI phases.
