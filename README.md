@@ -87,6 +87,19 @@ The phases are `preflight`, `plan` and `converge`. An adapter can add `purge` (t
 
 An error that needs an operator decision raises `Conflict`. An optional feature without completed preparation raises `NotReady`.
 
+## Testing adapters
+
+`FakeNative` records commands and returns configured `FakeProcess` responses without executing native commands.
+Its `run` method accepts positional command arguments and the keyword `check`.
+Checked failures raise `Conflict` with redacted command output.
+Use `check=False` to inspect a failed response.
+Test real subprocess diagnostics with `Native` and a patched `subprocess.run`.
+
+The next minor release changes the fake's test API.
+Remove the previously ignored `env`, `timeout`, and other keyword arguments from fake calls.
+Replace `allow_failure=True` with `check=False`.
+Catch `Conflict` instead of `CalledProcessError` for checked fake failures.
+
 ## Ownership
 
 nix-adapter does the mechanics: safe file replacement, command execution, diagnostics, plan output and the CLI phases.

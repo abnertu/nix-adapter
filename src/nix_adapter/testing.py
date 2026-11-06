@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import subprocess
-from typing import Any
 
-from .native import Native
+from .native import COMMAND_DIRECTORY, Native
 
 
 class FakeProcess(subprocess.CompletedProcess[str]):
@@ -40,24 +39,23 @@ class FakeNative(Native):
             return True
         return command in self.available_commands
 
-    def run(
-        self,
-        *argv: str,
-        check: bool = True,
-        env: dict[str, str] | None = None,
-        timeout: int | None = None,
-        allow_failure: bool = False,
-        **kwargs: Any,
-    ) -> FakeProcess:
+    def run(self, *argv: str, check: bool = True) -> FakeProcess:
         """Record `argv` and return its configured response.
 
-        Unlike `Native`, a failing response raises `CalledProcessError`.
+        Raise `Conflict` on checked failures, as `Native.run` does.
         """
+        if not argv:
+            raise ValueError("native command is required")
         self.calls.append(argv)
         cmd = tuple(argv)
         res = self.responses.get(cmd, FakeProcess())
-        if check and not allow_failure and res.returncode != 0:
-            raise subprocess.CalledProcessError(
-                res.returncode, list(argv), res.stdout, res.stderr
+        if check and res.returncode != 0:
+            if self.verbose:
+                self._emit(res.stdout, res.stderr)
+            raise self._failure(
+                f"native command failed with exit {res.returncode}",
+                self._command_line([COMMAND_DIRECTORY + argv[0], *argv[1:]]),
+                res.stdout,
+                res.stderr,
             )
         return res

@@ -37,7 +37,8 @@ nix-adapter is a generic Python and Nix library of reconciliation primitives.
 - Validate with `nix flake check`. It runs the unit tests, ruff, pyright strict, statix, deadnix and nixfmt.
 - `python -m unittest` in the dev shell tests the installed store copy, not the working tree.
 - Flakes see tracked files only. Stage each new file with `git add` before a Nix command.
-- `FakeNative` raises `CalledProcessError`, not `Conflict`. To test diagnostics or redaction, use `Native` with a patched `subprocess.run`.
+- `FakeNative.run` accepts the same arguments as `Native.run` and raises `Conflict` on checked failures.
+- Test subprocess diagnostics with `Native` and a patched `subprocess.run`.
 
 ## CI
 
