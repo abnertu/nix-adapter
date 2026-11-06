@@ -1,4 +1,4 @@
-name: Publish release
+name: Publish Release
 
 on:
   push:
@@ -16,8 +16,8 @@ env:
   TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
-  validation:
-    name: Verify tag validation
+  wait_for_validation:
+    name: Verify Tag Validation
     runs-on: ubuntu-latest
     timeout-minutes: 50
     permissions:
@@ -26,48 +26,48 @@ jobs:
     outputs:
       sha: ${{ steps.validation.outputs.sha }}
     steps:
-      - name: Check out workflow tooling
+      - name: Check Out Workflow Tooling
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.workflow_sha }}
           fetch-depth: 0
           persist-credentials: false
-      - name: Wait for the tag commit validation
+      - name: Wait for the Tag Commit Validation
         id: validation
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           sha=$(python3 scripts/wait-for-validation.py --repository "$GITHUB_REPOSITORY" --tag "$TAG")
           printf 'sha=%s\n' "$sha" >> "$GITHUB_OUTPUT"
-  release:
-    name: Verify version and publish GitHub release
-    needs: validation
+  publish_release:
+    name: Verify Version and Publish GitHub Release
+    needs: wait_for_validation
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
       contents: write
     env:
-      VALIDATED_SHA: ${{ needs.validation.outputs.sha }}
+      VALIDATED_SHA: ${{ needs.wait_for_validation.outputs.sha }}
     steps:
-      - name: Check out the release tag
+      - name: Check Out the Release Tag
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.validation.outputs.sha }}
+          ref: ${{ needs.wait_for_validation.outputs.sha }}
           fetch-depth: 0
           persist-credentials: false
-      - name: Verify the tag matches pyproject.toml
+      - name: Verify the Tag Matches pyproject.toml
         run: |
           version=$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
           [[ $TAG == "v$version" ]] || {
             echo "::error title=release::tag $TAG does not match version $version"
             exit 1
           }
-      - name: Write release notes
+      - name: Write Release Notes
         run: |
           # The release's own changelog section, up to the next heading.
           awk -v v="## ${TAG#v} (" 'index($0, v) == 1 {on=1; next} /^## /{on=0} on' CHANGELOG.md >"$RUNNER_TEMP/notes.md"
           [[ -s $RUNNER_TEMP/notes.md ]] || { echo "::error title=release::no CHANGELOG.md section for $TAG"; exit 1; }
-      - name: Create the release
+      - name: Create the Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

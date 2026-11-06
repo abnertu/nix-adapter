@@ -13,9 +13,26 @@ from dataclasses import dataclass
 from typing import cast
 from urllib.parse import urlencode
 
-WORKFLOW = "check.yml"
-JOB = "Validate the library on x86_64-linux"
-STEP = "Run the flake checks"
+
+@dataclass(frozen=True)
+class Contract:
+    """The validation identity recorded in the tagged source tree."""
+
+    path: str
+    job: str
+    step: str
+
+
+CURRENT = Contract(
+    ".github/workflows/validate-library.yml",
+    "Validate the Library on x86_64-linux",
+    "Run the Flake Checks",
+)
+LEGACY = Contract(
+    ".github/workflows/check.yml",
+    "Validate the library on x86_64-linux",
+    "Run the flake checks",
+)
 
 
 class GateError(Exception):
@@ -25,21 +42,21 @@ class GateError(Exception):
 def record(value: object) -> dict[str, object]:
     """Require a JSON object without exposing malformed response contents."""
     if not isinstance(value, dict):
-        raise GateError("check.yml validation metadata is not an object")
+        raise GateError("validation metadata is not an object")
     return cast("dict[str, object]", value)
 
 
 def number(value: object) -> int:
     """Require a positive metadata identifier or counter."""
     if type(value) is not int or value < 1:
-        raise GateError("check.yml metadata has an invalid identifier or counter")
+        raise GateError("validation metadata has an invalid identifier or counter")
     return value
 
 
 def text(value: object) -> str:
     """Require a nonempty metadata string."""
     if not isinstance(value, str) or not value:
-        raise GateError("check.yml metadata has an invalid string")
+        raise GateError("validation metadata has an invalid string")
     return value
 
 
@@ -53,7 +70,7 @@ class Deadline:
         """Return the remaining seconds or reject exhausted coverage."""
         remaining = self.end - time.monotonic()
         if remaining <= 0:
-            raise GateError("timed out waiting for check.yml validation")
+            raise GateError("timed out waiting for tag validation")
         return remaining
 
     def command(self, *argv: str) -> str:
@@ -89,6 +106,20 @@ def tag_commit(tag: str, deadline: Deadline) -> str:
     return sha
 
 
+def tag_contract(sha: str, deadline: Deadline) -> Contract:
+    """Select only an explicit current or historical validation contract."""
+    paths = set(
+        deadline.command(
+            "git", "ls-tree", "--name-only", sha, "--", CURRENT.path, LEGACY.path
+        ).splitlines()
+    )
+    if CURRENT.path in paths:
+        return CURRENT
+    if LEGACY.path in paths:
+        return LEGACY
+    raise GateError(f"{sha}: no supported validation workflow in the tagged tree")
+
+
 @dataclass(frozen=True)
 class Run:
     """Validated identity and outcome of one workflow run attempt."""
@@ -97,6 +128,7 @@ class Run:
     number: int
     attempt: int
     workflow: int
+    path: str
     sha: str
     branch: str
     event: str
@@ -112,6 +144,7 @@ class Run:
             number(item.get("run_number")),
             number(item.get("run_attempt")),
             number(item.get("workflow_id")),
+            text(item.get("path")),
             text(item.get("head_sha")),
             text(item.get("head_branch")),
             text(item.get("event")),
@@ -119,11 +152,11 @@ class Run:
             item.get("conclusion"),
         )
 
-    def matches(self, sha: str, workflow: int) -> bool:
+    def matches(self, sha: str, path: str) -> bool:
         """Whether this is the required workflow's push/main run for the tag."""
         return (
             self.sha == sha
-            and self.workflow == workflow
+            and self.path == path
             and self.branch == "main"
             and self.event == "push"
         )
@@ -169,62 +202,79 @@ class GitHub:
                 raise GateError(f"{path}: GitHub returned inconsistent pagination")
         raise GateError(f"{path}: metadata exceeds the supported search limit")
 
-    def latest(self, sha: str, workflow: int) -> Run | None:
-        """Select the newest matching run before considering any success."""
+    def latest(self, sha: str, contract: Contract) -> Run | None:
+        """Select exact-path coverage even after a filename endpoint retires."""
         query = urlencode({"head_sha": sha, "event": "push", "branch": "main"})
-        items = self.pages(
-            f"actions/workflows/{WORKFLOW}/runs?{query}", "workflow_runs"
-        )
-        runs = [Run.parse(item) for item in items]
-        return max(
-            (run for run in runs if run.matches(sha, workflow)),
-            key=lambda run: run.number,
-            default=None,
-        )
+        runs = [
+            Run.parse(item)
+            for item in self.pages(f"actions/runs?{query}", "workflow_runs")
+        ]
+        matching = [run for run in runs if run.matches(sha, contract.path)]
+        identities = {run.workflow for run in matching}
+        if len(identities) > 1:
+            raise GateError(
+                f"{contract.path}: validation workflow identity is ambiguous"
+            )
+        if identities:
+            identity = identities.pop()
+            workflow = self.api(f"actions/workflows/{identity}")
+            if (
+                number(workflow.get("id")) != identity
+                or workflow.get("path") != contract.path
+            ):
+                raise GateError(
+                    f"{contract.path}: validation workflow identity changed"
+                )
+        return max(matching, key=lambda run: run.number, default=None)
 
     def current(self, selected: Run) -> Run:
         """Refresh an attempt and enforce the selected run's identity."""
         run = Run.parse(self.api(f"actions/runs/{selected.id}"))
-        if run.id != selected.id or not run.matches(selected.sha, selected.workflow):
+        if (
+            run.id != selected.id
+            or run.workflow != selected.workflow
+            or not run.matches(selected.sha, selected.path)
+        ):
             raise GateError(f"validation run {selected.id} identity changed")
         return run
 
-    def checked_job(self, run: Run) -> None:
+    def checked_job(self, run: Run, contract: Contract) -> None:
         """Require the actual flake-check step in the current successful attempt."""
         jobs = self.pages(f"actions/runs/{run.id}/attempts/{run.attempt}/jobs", "jobs")
-        required = [record(job) for job in jobs if record(job).get("name") == JOB]
+        required = [
+            record(job) for job in jobs if record(job).get("name") == contract.job
+        ]
         if len(required) != 1:
-            raise GateError(f"required job {JOB} is missing or ambiguous")
+            raise GateError(f"required job {contract.job} is missing or ambiguous")
         job = required[0]
         if job.get("status") != "completed" or job.get("conclusion") != "success":
-            raise GateError(f"required job {JOB} did not succeed")
+            raise GateError(f"required job {contract.job} did not succeed")
         steps = job.get("steps")
         if not isinstance(steps, list):
-            raise GateError(f"required job {JOB} has no steps")
+            raise GateError(f"required job {contract.job} has no steps")
         required_steps = [
             record(step)
             for step in cast("list[object]", steps)
-            if record(step).get("name") == STEP
+            if record(step).get("name") == contract.step
         ]
         if len(required_steps) != 1:
-            raise GateError(f"required step {STEP} is missing or ambiguous")
+            raise GateError(f"required step {contract.step} is missing or ambiguous")
         step = required_steps[0]
         if step.get("status") != "completed" or step.get("conclusion") != "success":
-            raise GateError(f"required step {STEP} did not succeed")
+            raise GateError(f"required step {contract.step} did not succeed")
 
 
-def wait(github: GitHub, sha: str, interval: float) -> None:
+def wait(github: GitHub, sha: str, contract: Contract, interval: float) -> None:
     """Wait for current, complete coverage; terminal failures reject publication."""
-    workflow = number(github.api(f"actions/workflows/{WORKFLOW}").get("id"))
     while True:
-        selected = github.latest(sha, workflow)
+        selected = github.latest(sha, contract)
         if selected is not None:
             run = github.current(selected)
             if run.status == "completed":
                 if run.conclusion != "success":
                     raise GateError(f"validation run {run.id} did not succeed")
-                github.checked_job(run)
-                if github.current(run) == run and github.latest(sha, workflow) == run:
+                github.checked_job(run, contract)
+                if github.current(run) == run and github.latest(sha, contract) == run:
                     return
             elif run.status not in {
                 "queued",
@@ -258,7 +308,12 @@ def main() -> int:
             raise GateError("--repository is not a repository name")
         deadline = Deadline(time.monotonic() + args.timeout)
         sha = tag_commit(args.tag, deadline)
-        wait(GitHub(args.repository, deadline), sha, args.interval)
+        wait(
+            GitHub(args.repository, deadline),
+            sha,
+            tag_contract(sha, deadline),
+            args.interval,
+        )
         if tag_commit(args.tag, deadline) != sha:
             raise GateError(f"refs/tags/{args.tag} changed during validation")
         print(sha)

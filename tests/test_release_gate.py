@@ -68,13 +68,17 @@ class ReleaseGateTests(unittest.TestCase):
             "FIXTURE_ROOT": str(self.root),
         }
         self.git("init", "--quiet")
-        self.git("commit", "--quiet", "--allow-empty", "-m", "tagged fixture")
+        workflow = self.repo / ".github/workflows/check.yml"
+        workflow.parent.mkdir(parents=True)
+        workflow.write_text("name: Historical Validation\n")
+        self.git("add", ".github")
+        self.git("commit", "--quiet", "-m", "tagged fixture")
         self.sha = self.git("rev-parse", "HEAD").strip()
         self.git("tag", "-a", "v0.8.0", "-m", "fixture")
         self.git("commit", "--quiet", "--allow-empty", "-m", "newer fixture")
         self.head = self.git("rev-parse", "HEAD").strip()
         self.runs_path = (
-            "repos/fixture/project/actions/workflows/check.yml/runs?"
+            "repos/fixture/project/actions/runs?"
             f"head_sha={self.sha}&event=push&branch=main&per_page=100&page=1"
         )
         self.run_path = "repos/fixture/project/actions/runs/22"
@@ -86,6 +90,7 @@ class ReleaseGateTests(unittest.TestCase):
             "run_number": 2,
             "run_attempt": 1,
             "workflow_id": 11,
+            "path": ".github/workflows/check.yml",
             "head_sha": self.sha,
             "head_branch": "main",
             "event": "push",
@@ -105,12 +110,39 @@ class ReleaseGateTests(unittest.TestCase):
             ],
         }
         self.routes = {}
-        self.route("repos/fixture/project/actions/workflows/check.yml", {"id": 11})
+        self.install_routes()
+
+    def install_routes(self):
+        self.route(
+            "repos/fixture/project/actions/workflows/11",
+            {"id": 11, "path": self.validation_run["path"]},
+        )
         self.route(
             self.runs_path, {"total_count": 1, "workflow_runs": [self.validation_run]}
         )
         self.route(self.run_path, self.validation_run)
         self.route(self.jobs_path, {"total_count": 1, "jobs": [self.job]})
+
+    def select_current_contract(self):
+        (self.repo / ".github/workflows/validate-library.yml").write_text(
+            "name: Validate Library\n"
+        )
+        self.git("add", ".github")
+        self.git("commit", "--quiet", "-m", "rename validation workflow")
+        self.sha = self.git("rev-parse", "HEAD").strip()
+        self.git("tag", "--force", "v0.8.0", self.sha)
+        self.runs_path = (
+            "repos/fixture/project/actions/runs?"
+            f"head_sha={self.sha}&event=push&branch=main&per_page=100&page=1"
+        )
+        self.validation_run |= {
+            "head_sha": self.sha,
+            "path": ".github/workflows/validate-library.yml",
+        }
+        self.job["name"] = "Validate the Library on x86_64-linux"
+        self.job["steps"][0]["name"] = "Run the Flake Checks"
+        self.routes.clear()
+        self.install_routes()
 
     def git(self, *args):
         return subprocess.run(
@@ -168,6 +200,60 @@ class ReleaseGateTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip(), self.sha)
 
+    def test_historical_tag_works_when_filename_endpoint_is_retired(self):
+        retired = "repos/fixture/project/actions/workflows/check.yml"
+        self.routes[retired] = [{"exit": 1, "raw": "HTTP 404"}]
+        result = self.invoke()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        counts = json.loads((self.root / "calls.json").read_text())
+        self.assertNotIn(retired, counts)
+        self.assertIn("repos/fixture/project/actions/workflows/11", counts)
+
+    def test_current_tag_requires_current_contract_even_with_legacy_file_present(self):
+        self.select_current_contract()
+        result = self.invoke()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), self.sha)
+
+    def test_current_tag_rejects_legacy_and_unrelated_green_workflows(self):
+        self.select_current_contract()
+        for path in (".github/workflows/check.yml", ".github/workflows/other.yml"):
+            with self.subTest(path=path):
+                self.route(
+                    self.runs_path,
+                    {
+                        "total_count": 1,
+                        "workflow_runs": [self.validation_run | {"path": path}],
+                    },
+                )
+                self.assert_blocked(self.invoke(timeout="0.2"))
+
+    def test_current_validation_rejects_legacy_job_or_skipped_check_step(self):
+        self.select_current_contract()
+        for job in (
+            self.job | {"name": "Validate the library on x86_64-linux"},
+            self.job | {"steps": [self.job["steps"][0] | {"conclusion": "skipped"}]},
+        ):
+            with self.subTest(job=job):
+                self.route(self.jobs_path, {"total_count": 1, "jobs": [job]})
+                self.assert_blocked(self.invoke())
+
+    def test_unsupported_tagged_tree_never_queries_github(self):
+        self.git("rm", ".github/workflows/check.yml")
+        self.git("commit", "--quiet", "-m", "remove validation")
+        self.git("tag", "v0.9.0")
+        self.assert_blocked(self.invoke(tag="v0.9.0"))
+        self.assertFalse((self.root / "calls.json").exists())
+
+    def test_workflow_metadata_must_confirm_the_historical_identity(self):
+        for metadata in (
+            {"id": 12, "path": ".github/workflows/check.yml"},
+            {"id": 11, "path": ".github/workflows/other.yml"},
+        ):
+            with self.subTest(metadata=metadata):
+                self.route("repos/fixture/project/actions/workflows/11", metadata)
+                self.assert_blocked(self.invoke())
+
     def test_missing_or_invalid_tag_never_queries_github(self):
         for tag in ("v0.9.0", "main", "--help", "v01.2.3"):
             with self.subTest(tag=tag):
@@ -210,6 +296,7 @@ class ReleaseGateTests(unittest.TestCase):
         for identity in (
             {"head_sha": self.head},
             {"workflow_id": 12},
+            {"path": ".github/workflows/unrelated.yml"},
             {"head_branch": "feature"},
             {"event": "pull_request"},
         ):

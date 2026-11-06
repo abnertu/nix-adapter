@@ -2,7 +2,7 @@
 
 Python primitives for adapters that reconcile live host state with a manifest that Nix has evaluated.
 
-[![nix-adapter validation](https://github.com/abnertu/nix-adapter/actions/workflows/check.yml/badge.svg?branch=main)](https://github.com/abnertu/nix-adapter/actions/workflows/check.yml) [![Python](https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2Fabnertu%2Fnix-adapter%2Fmain%2Fpyproject.toml&query=%24.project%5B%27requires-python%27%5D&label=Python&logo=python&logoColor=white&color=3776AB)](https://www.python.org/)
+[![Validate Library](https://github.com/abnertu/nix-adapter/actions/workflows/validate-library.yml/badge.svg?branch=main)](https://github.com/abnertu/nix-adapter/actions/workflows/validate-library.yml?query=branch%3Amain) [![Python](https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2Fabnertu%2Fnix-adapter%2Fmain%2Fpyproject.toml&query=%24.project%5B%27requires-python%27%5D&label=Python&logo=python&logoColor=white&color=3776AB)](https://www.python.org/)
 
 An adapter reads the manifest and checks the host. It then changes only what differs and stops with a full diagnostic on each conflict.
 
@@ -102,7 +102,7 @@ Catch `Conflict` instead of `CalledProcessError` for checked fake failures.
 
 ## Releases
 
-The release workflow waits for successful `check.yml` validation of the exact tag commit on `main`.
+The release workflow waits for successful `validate-library.yml` validation of the exact tag commit on `main`.
 Missing validation times out after 40 minutes.
 Failed validation blocks publication.
 The gate also requires successful execution of the flake-check step.
@@ -110,6 +110,7 @@ Push the release commit to `main` with its tag.
 Rerun failed validation before retrying publication.
 Use the release workflow's `workflow_dispatch` input to retry an existing tag without moving it.
 Dispatch uses the selected workflow revision's tooling and validates the requested tag's commit.
+Tags before the workflow rename retain the historical `check.yml` job and step contract.
 
 ## Ownership
 
