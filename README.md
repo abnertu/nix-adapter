@@ -14,7 +14,7 @@ Add the flake input and use its Python environment:
 
 ```nix
 {
-  inputs.nix-adapter.url = "github:abnertu/nix-adapter?ref=v0.7.0";
+  inputs.nix-adapter.url = "github:abnertu/nix-adapter";
 
   outputs = { nix-adapter, ... }: {
     # Python 3 with nix-adapter on its path:
@@ -87,6 +87,15 @@ The phases are `preflight`, `plan` and `converge`. An adapter can add `purge` (t
 
 An error that needs an operator decision raises `Conflict`. An optional feature without completed preparation raises `NotReady`.
 
+`ensure_subordinate_range` validates public sub-ID allocation files before writing.
+Pass known numeric owner IDs through `aliases=("1001",)`.
+The helper treats the named owner and those explicit aliases as one account.
+A healthy numeric allocation keeps its original owner field.
+The writer rejects unsafe paths, malformed ranges, overlapping allocations, and multiple allocations for the managed account.
+Disjoint allocations for other accounts remain valid.
+Ranges use canonical decimal positive IDs and counts, ending at or below 4,294,967,294.
+Allocation records contain fewer than 1,024 UTF-8 bytes before LF.
+
 ## Testing adapters
 
 `FakeNative` records commands and returns configured `FakeProcess` responses without executing native commands.
@@ -95,7 +104,7 @@ Checked failures raise `Conflict` with redacted command output.
 Use `check=False` to inspect a failed response.
 Test real subprocess diagnostics with `Native` and a patched `subprocess.run`.
 
-The next minor release changes the fake's test API.
+When upgrading from 0.7.x, update adapter tests for the fake's API.
 Remove the previously ignored `env`, `timeout`, and other keyword arguments from fake calls.
 Replace `allow_failure=True` with `check=False`.
 Catch `Conflict` instead of `CalledProcessError` for checked fake failures.

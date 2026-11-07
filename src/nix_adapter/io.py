@@ -55,7 +55,13 @@ def directory_fd(path: Path, *, create: bool = False):
 
 
 @contextmanager
-def regular_file(parent: int, name: str):
+def regular_file(
+    parent: int,
+    name: str,
+    *,
+    encoding: str | None = None,
+    preserve_newlines: bool = False,
+):
     """Open `name` under the directory descriptor `parent` without following
     symlinks; yield the stream and its status.
 
@@ -68,7 +74,13 @@ def regular_file(parent: int, name: str):
         info = os.fstat(fd)
         if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
             raise Conflict(f"managed file {name} has an unexpected type or hard links")
-        with os.fdopen(fd, "r", closefd=False) as stream:
+        with os.fdopen(
+            fd,
+            "r",
+            encoding=encoding,
+            newline="" if preserve_newlines else None,
+            closefd=False,
+        ) as stream:
             yield stream, info
     finally:
         os.close(fd)
@@ -131,15 +143,27 @@ def atomic_write(
     uid: int = 0,
     gid: int = 0,
     before_change: Callable[[], None] | None = None,
+    encoding: str | None = None,
+    preserve_newlines: bool = False,
 ) -> bool:
     """Replace `path` atomically with `content`; return whether it changed.
 
     `before_change` runs just before the first mutation. Raise `Conflict`
     if the existing file has an unexpected owner, type or link count.
+    `encoding` selects comparison and write encoding; None uses the process locale.
+    `preserve_newlines` disables newline translation for comparison and writes.
     """
     with directory_fd(path.parent, create=True) as parent:
         try:
-            with regular_file(parent, path.name) as (stream, current):
+            with regular_file(
+                parent,
+                path.name,
+                encoding=encoding,
+                preserve_newlines=preserve_newlines,
+            ) as (
+                stream,
+                current,
+            ):
                 if current.st_uid not in (os.geteuid(), uid) and os.geteuid() != 0:
                     raise Conflict(f"managed file {path} has an unexpected owner")
                 if (
@@ -161,7 +185,9 @@ def atomic_write(
             dir_fd=parent,
         )
         try:
-            with os.fdopen(fd, "w") as stream:
+            with os.fdopen(
+                fd, "w", encoding=encoding, newline="" if preserve_newlines else None
+            ) as stream:
                 stream.write(content)
                 stream.flush()
                 os.fchown(stream.fileno(), uid, gid)

@@ -1,3 +1,4 @@
+# pyright: standard
 """Unit tests for nix_adapter.io primitives."""
 
 import os
@@ -44,6 +45,35 @@ class IoTests(unittest.TestCase):
                 remove_managed_file(link / "file")
 
             self.assertEqual(sentinel.read_text(), "unchanged")
+
+    def test_atomic_write_preserves_exact_line_endings_on_quiet_reruns(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "policy.txt"
+            for content in ("policy\n", "policy\r\n", "policy\r"):
+                with self.subTest(content=content):
+                    self.assertTrue(
+                        atomic_write(
+                            target,
+                            content,
+                            uid=os.getuid(),
+                            gid=os.getgid(),
+                            encoding="utf-8",
+                            preserve_newlines=True,
+                        )
+                    )
+                    self.assertEqual(target.read_bytes(), content.encode())
+                    inode = target.stat().st_ino
+                    self.assertFalse(
+                        atomic_write(
+                            target,
+                            content,
+                            uid=os.getuid(),
+                            gid=os.getgid(),
+                            encoding="utf-8",
+                            preserve_newlines=True,
+                        )
+                    )
+                    self.assertEqual(target.stat().st_ino, inode)
 
     def test_atomic_write_and_read(self):
         with tempfile.TemporaryDirectory() as directory:

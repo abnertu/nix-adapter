@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import dataclass
+from itertools import pairwise
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from .exceptions import Conflict
-from .io import atomic_write, read_managed
+from .io import atomic_write, directory_fd, regular_file
 from .native import Native
 
 
@@ -115,50 +117,163 @@ def ranges_overlap(left: dict[str, int], right: dict[str, int]) -> bool:
     return left["start"] <= right_end and right["start"] <= left_end
 
 
+@dataclass(frozen=True)
+class _Allocation:
+    """One public allocation and its original line position."""
+
+    owner: str
+    value: dict[str, int]
+    index: int
+
+
+def _valid_allocation_owner(owner: str) -> bool:
+    return (
+        bool(owner)
+        and not owner.startswith(("#", "+", "-"))
+        and all(
+            character.isprintable() and not character.isspace() and character != ":"
+            for character in owner
+        )
+    )
+
+
+def _validate_subordinate_value(file: Path, value: dict[str, int]) -> None:
+    start, count = value.get("start"), value.get("count")
+    if (
+        type(start) is not int
+        or type(count) is not int
+        or start <= 0
+        or count <= 0
+        or start + count - 1 > 4_294_967_294
+    ):
+        raise Conflict(f"invalid subordinate ID range in {file}")
+
+
+def _parse_allocation(file: Path, line: str, index: int) -> _Allocation | None:
+    if not line or line.startswith("#"):
+        return None
+    fields = line.split(":")
+    if (
+        len(line.encode("utf-8")) >= 1024
+        or len(fields) != 3
+        or not _valid_allocation_owner(fields[0])
+        or not all(
+            field.isascii() and field.isdecimal() and not field.startswith("0")
+            for field in fields[1:]
+        )
+    ):
+        raise Conflict(f"invalid subordinate ID allocation in {file}")
+    try:
+        value = {"start": int(fields[1]), "count": int(fields[2])}
+    except ValueError:
+        raise Conflict(f"invalid subordinate ID allocation in {file}") from None
+    _validate_subordinate_value(file, value)
+    return _Allocation(fields[0], value, index)
+
+
+def _subordinate_file(file: Path) -> tuple[list[str], list[_Allocation]]:
+    content = ""
+    try:
+        with (
+            directory_fd(file.parent) as parent,
+            regular_file(
+                parent, file.name, encoding="utf-8", preserve_newlines=True
+            ) as (
+                stream,
+                _,
+            ),
+        ):
+            content = stream.read()
+    except FileNotFoundError:
+        pass
+    except (OSError, UnicodeError):
+        raise Conflict(f"cannot read subordinate ID allocations in {file}") from None
+    if "\x00" in content:
+        raise Conflict(f"NUL byte in subordinate ID allocations in {file}")
+    lines = content.split("\n")
+    if lines[-1] == "":
+        lines.pop()
+    allocations = [
+        allocation
+        for index, line in enumerate(lines)
+        if (allocation := _parse_allocation(file, line, index)) is not None
+    ]
+    ordered = sorted(allocations, key=lambda allocation: allocation.value["start"])
+    for left, right in pairwise(ordered):
+        if ranges_overlap(left.value, right.value):
+            raise Conflict(f"overlapping subordinate ID allocations in {file}")
+    return lines, allocations
+
+
+def _owner_aliases(file: Path, value: object) -> set[str]:
+    if not isinstance(value, tuple):
+        raise Conflict(f"invalid subordinate ID owner aliases for {file}")
+    aliases: set[str] = set()
+    for alias in cast("tuple[object, ...]", value):
+        if not isinstance(alias, str) or not _valid_allocation_owner(alias):
+            raise Conflict(f"invalid subordinate ID owner aliases for {file}")
+        aliases.add(alias)
+    return aliases
+
+
+def _subordinate_state(
+    file: Path, user: str, desired: dict[str, int], aliases: tuple[str, ...]
+) -> tuple[list[str], _Allocation | None]:
+    if not _valid_allocation_owner(user):
+        raise Conflict(f"invalid subordinate ID account for {file}")
+    owners = {user, *_owner_aliases(file, aliases)}
+    _validate_subordinate_value(file, desired)
+    lines, allocations = _subordinate_file(file)
+    selected = [allocation for allocation in allocations if allocation.owner in owners]
+    if len(selected) > 1:
+        raise Conflict(
+            f"multiple subordinate ID allocations exist for {user} in {file}"
+        )
+    owner = selected[0].owner if selected else user
+    desired_line = f"{owner}:{desired['start']}:{desired['count']}"
+    if len(desired_line.encode("utf-8")) >= 1024:
+        raise Conflict(
+            f"subordinate ID allocation exceeds the native record limit in {file}"
+        )
+    for allocation in allocations:
+        if allocation.owner not in owners and ranges_overlap(desired, allocation.value):
+            raise Conflict(
+                f"desired subordinate ID range for {user} overlaps {allocation.owner} in {file}"
+            )
+    return lines, selected[0] if selected else None
+
+
 def ensure_subordinate_range(
     path: Path | str,
     user: str,
     desired: dict[str, int],
     uid: int | None = None,
     gid: int | None = None,
+    *,
+    aliases: tuple[str, ...] = (),
 ) -> None:
     """Give `user` the `desired` range in a subuid or subgid file.
 
-    Raise `Conflict` if the range overlaps another user's or the file is
-    malformed, and as `atomic_write` does. Ownership defaults to the effective
-    user and group.
+    Raise `Conflict` for unsafe or conflicting allocations and as
+    `atomic_write` does. Ownership defaults to the effective user and group.
+    Explicit owner aliases identify the same account; preserve existing aliases.
     """
     file = Path(path)
-    lines = read_managed(file).splitlines() if file.exists() else []
-    user_indices: list[int] = []
-    for index, line in enumerate(lines):
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        fields = stripped.split(":")
-        if len(fields) != 3 or not fields[1].isdigit() or not fields[2].isdigit():
-            raise Conflict(f"invalid subordinate ID allocation in {file}")
-        existing_user, start_text, count_text = fields
-        if existing_user == user:
-            user_indices.append(index)
-            continue
-        existing = {"start": int(start_text), "count": int(count_text)}
-        if ranges_overlap(desired, existing):
-            raise Conflict(
-                f"desired subordinate ID range for {user} overlaps {existing_user} in {file}"
-            )
-
-    if len(user_indices) > 1:
-        raise Conflict(
-            f"multiple subordinate ID allocations exist for {user} in {file}"
-        )
-    desired_line = f"{user}:{desired['start']}:{desired['count']}"
-    if user_indices:
-        lines[user_indices[0]] = desired_line
-    else:
+    lines, allocation = _subordinate_state(file, user, desired, aliases)
+    owner = allocation.owner if allocation is not None else user
+    desired_line = f"{owner}:{desired['start']}:{desired['count']}"
+    if allocation is None:
         lines.append(desired_line)
+    else:
+        lines[allocation.index] = desired_line
     target_uid = os.geteuid() if uid is None else uid
     target_gid = os.getegid() if gid is None else gid
     atomic_write(
-        file, "\n".join(lines) + "\n", mode=0o644, uid=target_uid, gid=target_gid
+        file,
+        "\n".join(lines) + "\n",
+        mode=0o644,
+        uid=target_uid,
+        gid=target_gid,
+        encoding="utf-8",
+        preserve_newlines=True,
     )
