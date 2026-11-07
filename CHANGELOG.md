@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.8.0 (2026-11-07)
+
+### Features
+
+- **system**: Expose read-only subordinate range inspection
+
+### Fixes
+
+- **testing**: Align fake native calls with the runtime contract (breaking)
+- **system**: Validate native subordinate ID records
+
 ## 0.7.0 (2026-11-05)
 
 ### Features
