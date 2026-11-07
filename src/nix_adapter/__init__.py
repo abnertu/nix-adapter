@@ -20,7 +20,7 @@ from .native import Native
 from .plan import STYLES, Change, render
 from .progress import Progress, Task
 from .service import BaseServiceAdapter
-from .system import ensure_subordinate_range, ranges_overlap
+from .system import ensure_subordinate_range, inspect_subordinate_range, ranges_overlap
 from .systemd import Systemd
 from .testing import FakeNative, FakeProcess
 from .toml import dump_toml, parse_toml
@@ -51,6 +51,7 @@ __all__ = [
     "ensure_directory",
     "ensure_subordinate_range",
     "ini",
+    "inspect_subordinate_range",
     "locale_gen",
     "operation_lock",
     "parse_toml",

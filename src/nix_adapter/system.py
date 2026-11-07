@@ -243,6 +243,24 @@ def _subordinate_state(
     return lines, selected[0] if selected else None
 
 
+def inspect_subordinate_range(
+    path: Path | str,
+    user: str,
+    desired: dict[str, int],
+    *,
+    aliases: tuple[str, ...] = (),
+) -> bool:
+    """Return whether one allocation matches, without creating or changing files.
+
+    Raise `Conflict` for unsafe paths, malformed or overlapping allocations,
+    duplicate allocations for `user` and explicit owner aliases, or overlap
+    with the desired range. Callers supply any numeric native identity aliases.
+    """
+    _, allocation = _subordinate_state(Path(path), user, desired, aliases)
+    value = {"start": desired["start"], "count": desired["count"]}
+    return allocation is not None and allocation.value == value
+
+
 def ensure_subordinate_range(
     path: Path | str,
     user: str,

@@ -87,11 +87,12 @@ The phases are `preflight`, `plan` and `converge`. An adapter can add `purge` (t
 
 An error that needs an operator decision raises `Conflict`. An optional feature without completed preparation raises `NotReady`.
 
-`ensure_subordinate_range` validates public sub-ID allocation files before writing.
-Pass known numeric owner IDs through `aliases=("1001",)`.
-The helper treats the named owner and those explicit aliases as one account.
+`inspect_subordinate_range(path, user, desired)` reports whether one public sub-ID allocation matches without changing files.
+`ensure_subordinate_range` uses the same validation before writing.
+Pass known numeric owner IDs through `aliases=("1001",)` to both helpers.
+Both helpers treat the named owner and those explicit aliases as one account.
 A healthy numeric allocation keeps its original owner field.
-The writer rejects unsafe paths, malformed ranges, overlapping allocations, and multiple allocations for the managed account.
+Both helpers reject unsafe paths, malformed ranges, overlapping allocations, and multiple allocations for the managed account.
 Disjoint allocations for other accounts remain valid.
 Ranges use canonical decimal positive IDs and counts, ending at or below 4,294,967,294.
 Allocation records contain fewer than 1,024 UTF-8 bytes before LF.
