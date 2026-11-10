@@ -16,6 +16,7 @@ from typing import Any, cast
 from .exceptions import Conflict
 from .io import atomic_write, directory_fd, regular_file
 from .native import Native
+from .systemd import key_values
 
 
 def get_timezone(native: Native, root: Path | str = "/") -> str | None:
@@ -38,13 +39,14 @@ def get_timezone(native: Native, root: Path | str = "/") -> str | None:
                 f"{localtime_path} has an unexpected symlink target: {target}"
             )
 
-    values = native.run(
-        "timedatectl",
-        "show",
-        "--property=Timezone",
-        "--property=LocalRTC",
-    ).stdout
-    state = dict(line.split("=", 1) for line in values.splitlines() if "=" in line)
+    state = key_values(
+        native.run(
+            "timedatectl",
+            "show",
+            "--property=Timezone",
+            "--property=LocalRTC",
+        ).stdout
+    )
     if state.get("LocalRTC") != "no":
         raise Conflict(
             "timedatectl reports LocalRTC; a local RTC needs an operator decision"

@@ -12,6 +12,11 @@ UNIT_STATE = ("LoadState", "ActiveState", "UnitFileState")
 MASKED = ("masked", "masked-runtime")
 
 
+def key_values(output: str) -> dict[str, str]:
+    """The `key=value` lines that `systemctl show` and `timedatectl show` print."""
+    return dict(line.split("=", 1) for line in output.splitlines() if "=" in line)
+
+
 class Systemd:
     """`systemctl` for the system manager, or for the user manager if `user`.
 
@@ -43,8 +48,7 @@ class Systemd:
         args = ["show", unit]
         if properties:
             args.append(f"--property={','.join(properties)}")
-        output = self._systemctl(*args).stdout
-        return dict(line.split("=", 1) for line in output.splitlines() if "=" in line)
+        return key_values(self._systemctl(*args).stdout)
 
     def ready_unit(self, unit: str) -> dict[str, str]:
         """The unit's state; raise `Conflict` if it is not loaded or is masked."""
