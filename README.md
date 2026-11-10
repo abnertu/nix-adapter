@@ -2,7 +2,7 @@
 
 Python primitives for adapters that reconcile live host state with a manifest that Nix has evaluated.
 
-[![Validate Library](https://github.com/abnertu/nix-adapter/actions/workflows/validate-library.yml/badge.svg?branch=main)](https://github.com/abnertu/nix-adapter/actions/workflows/validate-library.yml?query=branch%3Amain) [![Python](https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2Fabnertu%2Fnix-adapter%2Fmain%2Fpyproject.toml&query=%24.project%5B%27requires-python%27%5D&label=Python&logo=python&logoColor=white&color=3776AB)](https://www.python.org/)
+[![Validate](https://github.com/abnertu/nix-adapter/actions/workflows/validate-library.yml/badge.svg?branch=main)](https://github.com/abnertu/nix-adapter/actions/workflows/validate-library.yml?query=branch%3Amain) [![Python](https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2Fabnertu%2Fnix-adapter%2Fmain%2Fpyproject.toml&query=%24.project%5B%27requires-python%27%5D&label=Python&logo=python&logoColor=white&color=3776AB)](https://www.python.org/)
 
 An adapter reads the manifest and checks the host. It then changes only what differs and stops with a full diagnostic on each conflict.
 

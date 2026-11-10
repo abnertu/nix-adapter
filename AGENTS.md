@@ -51,6 +51,7 @@ nix-adapter is a generic Python and Nix library of reconciliation primitives.
 - Keep reserved host filenames, including `.gitlab-ci.yml`.
 - Name workflows in Title Case, such as `Deploy Production`.
 - Keep the repository name out of workflow names.
+- Name the workflow that validates the whole repository by its action alone, such as `Validate`.
 - Name job IDs in snake_case, such as `build_image`.
 - Start each GitHub step name with a verb, such as `Install Dependencies` or `Run Tests`.
 - Preserve proper nouns and code identifiers when applying case.
