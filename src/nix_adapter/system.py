@@ -218,31 +218,57 @@ def _owner_aliases(file: Path, value: object) -> set[str]:
     return aliases
 
 
-def _subordinate_state(
-    file: Path, user: str, desired: dict[str, int], aliases: tuple[str, ...]
-) -> tuple[list[str], _Allocation | None]:
+def _owners(file: Path, user: str, aliases: object) -> set[str]:
     if not _valid_allocation_owner(user):
         raise Conflict(f"invalid subordinate ID account for {file}")
-    owners = {user, *_owner_aliases(file, aliases)}
-    _validate_subordinate_value(file, desired)
+    return {user, *_owner_aliases(file, aliases)}
+
+
+def _select_allocation(
+    file: Path, user: str, owners: set[str]
+) -> tuple[list[str], list[_Allocation], _Allocation | None]:
     lines, allocations = _subordinate_file(file)
     selected = [allocation for allocation in allocations if allocation.owner in owners]
     if len(selected) > 1:
         raise Conflict(
             f"multiple subordinate ID allocations exist for {user} in {file}"
         )
-    owner = selected[0].owner if selected else user
+    return lines, allocations, selected[0] if selected else None
+
+
+def _subordinate_state(
+    file: Path, user: str, desired: dict[str, int], aliases: tuple[str, ...]
+) -> tuple[list[str], _Allocation | None]:
+    owners = _owners(file, user, aliases)
+    _validate_subordinate_value(file, desired)
+    lines, allocations, allocation = _select_allocation(file, user, owners)
+    owner = allocation.owner if allocation is not None else user
     desired_line = f"{owner}:{desired['start']}:{desired['count']}"
     if len(desired_line.encode("utf-8")) >= 1024:
         raise Conflict(
             f"subordinate ID allocation exceeds the native record limit in {file}"
         )
-    for allocation in allocations:
-        if allocation.owner not in owners and ranges_overlap(desired, allocation.value):
+    for other in allocations:
+        if other.owner not in owners and ranges_overlap(desired, other.value):
             raise Conflict(
-                f"desired subordinate ID range for {user} overlaps {allocation.owner} in {file}"
+                f"desired subordinate ID range for {user} overlaps {other.owner} in {file}"
             )
-    return lines, selected[0] if selected else None
+    return lines, allocation
+
+
+def subordinate_allocation(
+    path: Path | str, user: str, *, aliases: tuple[str, ...] = ()
+) -> dict[str, int] | None:
+    """Return the one allocation of `user` or an explicit alias, or None.
+
+    Raise `Conflict` for unsafe paths, malformed or overlapping allocations,
+    invalid accounts or aliases, and duplicate allocations for the account.
+    It changes no file.
+    """
+    file = Path(path)
+    owners = _owners(file, user, aliases)
+    _, _, allocation = _select_allocation(file, user, owners)
+    return dict(allocation.value) if allocation is not None else None
 
 
 def inspect_subordinate_range(
@@ -297,3 +323,40 @@ def ensure_subordinate_range(
         encoding="utf-8",
         preserve_newlines=True,
     )
+
+
+def remove_subordinate_range(
+    path: Path | str,
+    user: str,
+    desired: dict[str, int],
+    uid: int | None = None,
+    gid: int | None = None,
+    *,
+    aliases: tuple[str, ...] = (),
+) -> bool:
+    """Remove the `desired` allocation of `user`; return whether the file changed.
+
+    Return False without a write when the account has no allocation. Raise
+    `Conflict` for a drifted allocation, for the validation errors of
+    `subordinate_allocation`, and as `atomic_write` does. Ownership defaults
+    to the effective user and group, as `ensure_subordinate_range` does.
+    """
+    file = Path(path)
+    owners = _owners(file, user, aliases)
+    _validate_subordinate_value(file, desired)
+    lines, _, allocation = _select_allocation(file, user, owners)
+    if allocation is None:
+        return False
+    if allocation.value != {"start": desired["start"], "count": desired["count"]}:
+        raise Conflict(f"drifted subordinate ID allocation for {user} in {file}")
+    del lines[allocation.index]
+    atomic_write(
+        file,
+        "\n".join(lines) + "\n" if lines else "",
+        mode=0o644,
+        uid=os.geteuid() if uid is None else uid,
+        gid=os.getegid() if gid is None else gid,
+        encoding="utf-8",
+        preserve_newlines=True,
+    )
+    return True

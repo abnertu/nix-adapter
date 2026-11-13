@@ -89,10 +89,14 @@ An error that needs an operator decision raises `Conflict`. An optional feature 
 
 `inspect_subordinate_range(path, user, desired)` reports whether one public sub-ID allocation matches without changing files.
 `ensure_subordinate_range` uses the same validation before writing.
-Pass known numeric owner IDs through `aliases=("1001",)` to both helpers.
-Both helpers treat the named owner and those explicit aliases as one account.
+`subordinate_allocation(path, user)` returns the account's one allocation, or None, without changing files.
+`remove_subordinate_range(path, user, desired)` removes the matching allocation and returns whether the file changed.
+It refuses a drifted allocation. Removing the last allocation leaves an empty file.
+Pass known numeric owner IDs through `aliases=("1001",)` to all four helpers.
+All four helpers treat the named owner and those explicit aliases as one account.
 A healthy numeric allocation keeps its original owner field.
-Both helpers reject unsafe paths, malformed ranges, overlapping allocations, and multiple allocations for the managed account.
+All four helpers reject unsafe paths, malformed ranges, overlapping allocations, and multiple allocations for the managed account.
+`ensure_subordinate_range` and `inspect_subordinate_range` also reject a desired range that overlaps another account.
 Disjoint allocations for other accounts remain valid.
 Ranges use canonical decimal positive IDs and counts, ending at or below 4,294,967,294.
 Allocation records contain fewer than 1,024 UTF-8 bytes before LF.

@@ -10,7 +10,27 @@ import unittest
 from pathlib import Path
 from typing import cast
 
-from nix_adapter import Conflict, ensure_subordinate_range, inspect_subordinate_range
+from nix_adapter import (
+    Conflict,
+    ensure_subordinate_range,
+    inspect_subordinate_range,
+    remove_subordinate_range,
+    subordinate_allocation,
+)
+
+
+def _allocation(path, user, desired=None, *, aliases=()):
+    """Call the lookup through the shared operation signature; it takes no range."""
+    del desired
+    return subordinate_allocation(path, user, aliases=aliases)
+
+
+ALL_OPERATIONS = (
+    ensure_subordinate_range,
+    inspect_subordinate_range,
+    remove_subordinate_range,
+    _allocation,
+)
 
 
 class _SubordinateFixture(unittest.TestCase):
@@ -70,7 +90,13 @@ class SubordinateRangeTests(_SubordinateFixture):
             "bob:4294967294:2\n",
             "bob:٢٠٠٠٠٠:65536\n",
         ):
-            for operation in (ensure_subordinate_range, inspect_subordinate_range):
+            operations = (
+                (ensure_subordinate_range, inspect_subordinate_range)
+                # This file is valid; it only overlaps the desired range.
+                if content == "bob:120000:65536\n"
+                else ALL_OPERATIONS
+            )
+            for operation in operations:
                 with self.subTest(content=content, operation=operation.__name__):
                     self.path.write_bytes(
                         content.encode("utf-8") if isinstance(content, str) else content
@@ -101,9 +127,21 @@ class SubordinateRangeTests(_SubordinateFixture):
             ("alice", {"start": 100000, "count": 0}),
             ("alice", {"start": 4294967294, "count": 2}),
         ):
-            with self.subTest(user=user, desired=desired), self.assertRaises(Conflict):
-                ensure_subordinate_range(self.path, user, desired)
-            self.assertFalse(self.path.exists())
+            record_limit = len(user.encode("utf-8")) > 1000
+            account_error = desired is self.desired and not record_limit
+            for operation in (
+                ensure_subordinate_range,
+                *(() if record_limit else (remove_subordinate_range,)),
+                *((_allocation,) if account_error else ()),
+            ):
+                with (
+                    self.subTest(
+                        user=user, desired=desired, operation=operation.__name__
+                    ),
+                    self.assertRaises(Conflict),
+                ):
+                    operation(self.path, user, desired)
+                self.assertFalse(self.path.exists())
 
     def test_named_and_numeric_aliases_cannot_allocate_twice(self):
         self.path.write_text("1001:100000:65536\nalice:300000:65536\n")
@@ -131,14 +169,18 @@ class SubordinateRangeTests(_SubordinateFixture):
 
     def test_invalid_owner_aliases_never_create_files(self):
         for aliases in (("#1001",), ("+1001",), ("1001\n",), "1001", (1001,), ["1001"]):
-            with self.subTest(aliases=aliases), self.assertRaises(Conflict):
-                ensure_subordinate_range(
-                    self.path,
-                    "alice",
-                    self.desired,
-                    aliases=cast("tuple[str, ...]", aliases),
-                )
-            self.assertFalse(self.path.exists())
+            for operation in ALL_OPERATIONS:
+                with (
+                    self.subTest(aliases=aliases, operation=operation.__name__),
+                    self.assertRaises(Conflict),
+                ):
+                    operation(
+                        self.path,
+                        "alice",
+                        self.desired,
+                        aliases=cast("tuple[str, ...]", aliases),
+                    )
+                self.assertFalse(self.path.exists())
 
     def test_native_record_boundary_is_counted_in_bytes_before_lf(self):
         for user in ("a" * 1010, "é" * 505):
@@ -176,9 +218,13 @@ class SubordinateRangeTests(_SubordinateFixture):
                     self.path.mkdir()
                 else:
                     os.mkfifo(self.path)
-                with self.assertRaises(Conflict):
-                    ensure_subordinate_range(self.path, "alice", self.desired)
-                self.assertEqual(target.read_text(), "alice:100000:65536\n")
+                for operation in ALL_OPERATIONS:
+                    with (
+                        self.subTest(operation=operation.__name__),
+                        self.assertRaises(Conflict),
+                    ):
+                        operation(self.path, "alice", self.desired)
+                    self.assertEqual(target.read_text(), "alice:100000:65536\n")
                 if kind == "directory":
                     self.path.rmdir()
                 else:
@@ -254,16 +300,112 @@ class SubordinateInspectionTests(_SubordinateFixture):
         actual = self.root / "actual"
         actual.mkdir()
         (self.root / "alias").symlink_to(actual, target_is_directory=True)
-        with self.assertRaises(Conflict):
-            inspect_subordinate_range(self.root / "alias/subuid", "alice", self.desired)
-        self.assertEqual(list(actual.iterdir()), [])
         target = self.root / "target"
         target.write_text("alice:100000:65536\n")
         self.path.symlink_to(target)
         before = target.read_bytes()
-        with self.assertRaises(Conflict):
-            inspect_subordinate_range(self.path, "alice", self.desired)
-        self.assertEqual(target.read_bytes(), before)
+        for operation in ALL_OPERATIONS:
+            with self.subTest(operation=operation.__name__):
+                with self.assertRaises(Conflict):
+                    operation(self.root / "alias/subuid", "alice", self.desired)
+                self.assertEqual(list(actual.iterdir()), [])
+                with self.assertRaises(Conflict):
+                    operation(self.path, "alice", self.desired)
+                self.assertEqual(target.read_bytes(), before)
+
+
+class SubordinateAllocationTests(_SubordinateFixture):
+    def test_allocation_is_selected_by_name_or_numeric_alias(self):
+        for content, aliases, expected in (
+            ("bob:200000:65536\n", (), None),
+            ("# comment\nalice:100000:65536\n", (), self.desired),
+            ("1001:100000:32768\n", ("1001",), {"start": 100000, "count": 32768}),
+        ):
+            with self.subTest(content=content):
+                self.path.write_text(content)
+                before = self.snapshot()
+                self.assertEqual(
+                    subordinate_allocation(self.path, "alice", aliases=aliases),
+                    expected,
+                )
+                self.assertEqual(self.snapshot(), before)
+
+    def test_named_and_numeric_lines_are_one_duplicated_account(self):
+        self.path.write_text("1001:100000:65536\nalice:300000:65536\n")
+        before = self.snapshot()
+        for operation in (_allocation, remove_subordinate_range):
+            with (
+                self.subTest(operation=operation.__name__),
+                self.assertRaises(Conflict),
+            ):
+                operation(self.path, "alice", self.desired, aliases=("1001",))
+            self.assertEqual(self.snapshot(), before)
+
+
+class SubordinateRemovalTests(_SubordinateFixture):
+    def test_declared_allocation_is_removed_by_name_or_numeric_alias(self):
+        for line, aliases in (
+            ("alice:100000:65536", ()),
+            ("1001:100000:65536", ("1001",)),
+        ):
+            with self.subTest(line=line):
+                self.path.write_text(
+                    f"# comment\nbob:200000:65536\n{line}\ncarol:300000:10\n"
+                )
+                self.assertIs(
+                    remove_subordinate_range(
+                        self.path, "alice", self.desired, aliases=aliases
+                    ),
+                    True,
+                )
+                self.assertEqual(
+                    self.path.read_text(),
+                    "# comment\nbob:200000:65536\ncarol:300000:10\n",
+                )
+                before = self.snapshot()
+                self.assertIs(
+                    remove_subordinate_range(
+                        self.path, "alice", self.desired, aliases=aliases
+                    ),
+                    False,
+                )
+                self.assertEqual(self.snapshot(), before)
+
+    def test_last_allocation_leaves_an_empty_file(self):
+        self.path.write_text("alice:100000:65536\n")
+        self.assertIs(remove_subordinate_range(self.path, "alice", self.desired), True)
+        self.assertEqual(self.path.read_bytes(), b"")
+
+    def test_absent_allocation_is_not_written_even_when_the_range_overlaps(self):
+        self.path.write_text("bob:120000:65536\n")
+        before = self.snapshot()
+        self.assertIs(remove_subordinate_range(self.path, "alice", self.desired), False)
+        self.assertEqual(self.snapshot(), before)
+
+    def test_drifted_allocation_is_refused_without_a_write(self):
+        for line in ("alice:100000:32768\n", "alice:200000:65536\n"):
+            with self.subTest(line=line):
+                self.path.write_text(line)
+                before = self.snapshot()
+                with self.assertRaises(Conflict) as raised:
+                    remove_subordinate_range(self.path, "alice", self.desired)
+                self.assertIn(str(self.path), str(raised.exception))
+                self.assertEqual(self.snapshot(), before)
+
+    def test_extra_caller_metadata_is_ignored(self):
+        self.path.write_text("alice:100000:65536\n")
+        desired = self.desired | {"extra": 1}
+        self.assertIs(remove_subordinate_range(self.path, "alice", desired), True)
+        self.assertEqual(self.path.read_bytes(), b"")
+
+    def test_missing_file_and_parent_are_not_created(self):
+        for path in (self.root / "subgid", self.root / "missing" / "subgid"):
+            with self.subTest(path=path):
+                self.assertIsNone(subordinate_allocation(path, "alice"))
+                self.assertIs(
+                    remove_subordinate_range(path, "alice", self.desired), False
+                )
+                self.assertEqual(list(self.root.iterdir()), [])
 
 
 if __name__ == "__main__":
