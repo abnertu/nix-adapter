@@ -95,6 +95,75 @@ class FilesOperationsTests(unittest.TestCase):
         self.assertFalse(self.files.pending(action))
 
 
+class FilesBytesAndLinksTests(unittest.TestCase):
+    """Byte and symlink operations never follow the leaf and keep the text API."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        (self.root / "etc").mkdir()
+        self.files = Files(self.root, (os.getuid(), os.getgid()))
+        self.data = b"\x00binary\xff\xfe\n"
+
+    def test_bytes_round_trip_with_mode_and_identity(self):
+        self.assertIsNone(self.files.read_bytes("/etc/blob"))
+        self.assertTrue(self.files.write_bytes("/etc/blob", self.data, 0o600))
+        self.assertEqual(self.files.read_bytes("/etc/blob"), self.data)
+        info = (self.root / "etc/blob").stat()
+        self.assertEqual(info.st_mode & 0o777, 0o600)
+        self.assertEqual((info.st_uid, info.st_gid), self.files.identity)
+        self.assertFalse(self.files.write_bytes("/etc/blob", self.data, 0o600))
+        self.assertTrue(self.files.write_bytes("/etc/blob", self.data, 0o644))
+
+    def test_byte_write_replaces_a_link_and_leaves_its_target(self):
+        target = self.root / "etc/target"
+        target.write_bytes(b"keep")
+        (self.root / "etc/blob").symlink_to(target)
+        self.assertTrue(self.files.write_bytes("/etc/blob", self.data))
+        self.assertFalse((self.root / "etc/blob").is_symlink())
+        self.assertEqual(target.read_bytes(), b"keep")
+
+    def test_links_are_written_and_read_without_following(self):
+        self.assertIsNone(self.files.read_link("/etc/link"))
+        for target in ("/missing/file", str(self.root)):
+            with self.subTest(target=target):
+                self.assertTrue(self.files.write_link("/etc/link", target))
+                self.assertEqual(self.files.read_link("/etc/link"), target)
+                self.assertFalse(self.files.write_link("/etc/link", target))
+        (self.root / "etc/file").write_text("x")
+        self.assertTrue(self.files.write_link("/etc/file", "/missing"))
+        self.assertEqual(os.readlink(self.root / "etc/file"), "/missing")
+        info = (self.root / "etc/link").lstat()
+        self.assertEqual((info.st_uid, info.st_gid), self.files.identity)
+
+    def test_wrong_leaf_kinds_raise_with_the_path(self):
+        (self.root / "etc/dir").mkdir()
+        (self.root / "etc/file").write_text("x")
+        (self.root / "etc/link").symlink_to("/missing")
+        cases = [
+            (lambda: self.files.read_bytes("/etc/link"), "/etc/link"),
+            (lambda: self.files.read_bytes("/etc/dir"), "/etc/dir"),
+            (lambda: self.files.read_link("/etc/file"), "/etc/file"),
+            (lambda: self.files.write_bytes("/etc/dir", b"x"), "/etc/dir"),
+            (lambda: self.files.write_link("/etc/dir", "/x"), "/etc/dir"),
+        ]
+        for call, path in cases:
+            with self.subTest(path=path), self.assertRaisesRegex(Conflict, path):
+                call()
+
+    def test_symlinked_parent_still_raises(self):
+        (self.root / "etc/parent").symlink_to(self.root / "etc")
+        for call in (
+            lambda: self.files.read_bytes("/etc/parent/blob"),
+            lambda: self.files.write_bytes("/etc/parent/blob", b"x"),
+            lambda: self.files.read_link("/etc/parent/link"),
+            lambda: self.files.write_link("/etc/parent/link", "/x"),
+        ):
+            with self.subTest(), self.assertRaisesRegex(Conflict, "symlink in managed"):
+                call()
+
+
 class FilesDiagnosticsTests(unittest.TestCase):
     def test_path_errors_name_the_offending_system_path(self):
         with tempfile.TemporaryDirectory() as directory:

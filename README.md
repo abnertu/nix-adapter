@@ -73,7 +73,7 @@ The phases are `preflight`, `plan` and `converge`. An adapter can add `purge` (t
 | `service` | `BaseServiceAdapter`: one service with its account and unit files |
 | `cli` | `run_adapter_cli` and the `Adapter`, `Purgeable` and `ExtraPhases` protocols |
 | `context` | `AdapterContext`: the `--verbose` and `--color` settings of one invocation |
-| `files` | `Files`: owned paths, atomic writes, pending markers, drop-in checks and config parsers |
+| `files` | `Files`: owned paths, atomic text, byte and symlink writes, pending markers, drop-in checks and config parsers |
 | `io` | Atomic, symlink-safe file operations |
 | `native` | `Native`: a command runner that keeps stdout, stderr and timeout output, with redaction |
 | `systemd` | `Systemd`: unit inspection and control |

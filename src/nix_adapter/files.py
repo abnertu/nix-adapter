@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import secrets
 import shlex
 import stat
 import tempfile
@@ -261,6 +262,98 @@ class Files:
             self.sync_dir(path.parent)
         finally:
             Path(temporary).unlink(missing_ok=True)
+        return True
+
+    def read_bytes(self, name: str) -> bytes | None:
+        """The bytes of regular file `name`, or None if nothing is there.
+
+        Raise `Conflict` if the path is unsafe (see `path`) or the leaf is a
+        link, a directory or another non-file. It never follows the leaf.
+        """
+        path = self.path(name, symlink_leaf=True)
+        if not os.path.lexists(path):
+            return None
+        if not stat.S_ISREG(path.lstat().st_mode):
+            raise Conflict(f"managed path is not a regular file: {name}")
+        return path.read_bytes()
+
+    def read_link(self, name: str) -> str | None:
+        """The target of symlink `name`, or None if nothing is there.
+
+        Raise `Conflict` if the path is unsafe or the leaf is not a symlink.
+        """
+        path = self.path(name, symlink_leaf=True)
+        if not os.path.lexists(path):
+            return None
+        if not path.is_symlink():
+            raise Conflict(f"managed path is not a symlink: {name}")
+        return os.readlink(path)
+
+    def _replaceable(self, name: str) -> Path:
+        """The checked leaf of `name`, which a write may replace: a file or link."""
+        path = self.path(name, symlink_leaf=True)
+        if os.path.lexists(path) and stat.S_ISDIR(path.lstat().st_mode):
+            raise Conflict(f"managed path is a directory: {name}")
+        return path
+
+    def write_bytes(self, name: str, data: bytes, mode: int = 0o644) -> bool:
+        """Replace `name` atomically with `data`; return whether it changed.
+
+        A link at `name` is replaced, never followed. Raise `Conflict` if
+        the path is unsafe or the leaf is a directory.
+        """
+        path = self._replaceable(name)
+        if not path.is_symlink() and path.exists():
+            info = path.lstat()
+            if (
+                stat.S_ISREG(info.st_mode)
+                and stat.S_IMODE(info.st_mode) == mode
+                and (info.st_uid, info.st_gid) == self.identity
+                and path.read_bytes() == data
+            ):
+                return False
+        path.parent.mkdir(parents=True, exist_ok=True)
+        descriptor, temporary = tempfile.mkstemp(
+            prefix=TEMPORARY_PREFIX, dir=path.parent
+        )
+        try:
+            with os.fdopen(descriptor, "wb") as stream:
+                os.fchmod(stream.fileno(), mode)
+                os.fchown(stream.fileno(), *self.identity)
+                stream.write(data)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, path)
+            self.sync_dir(path.parent)
+        finally:
+            Path(temporary).unlink(missing_ok=True)
+        return True
+
+    def write_link(self, name: str, target: str) -> bool:
+        """Make `name` a symlink to `target` atomically; return whether it changed.
+
+        A file or link at `name` is replaced, never followed, and the link
+        gets this identity. Raise `Conflict` if the path is unsafe or the
+        leaf is a directory.
+        """
+        path = self._replaceable(name)
+        if path.is_symlink():
+            info = path.lstat()
+            if (
+                os.readlink(path) == target
+                and (info.st_uid, info.st_gid) == self.identity
+            ):
+                return False
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.parent / f"{TEMPORARY_PREFIX}{secrets.token_hex(8)}"
+        os.symlink(target, temporary)
+        try:
+            os.chown(temporary, *self.identity, follow_symlinks=False)
+            os.replace(temporary, path)
+            self.sync_dir(path.parent)
+        finally:
+            if os.path.lexists(temporary):
+                temporary.unlink()
         return True
 
     @staticmethod
