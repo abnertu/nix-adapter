@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.0 (2026-11-27)
+
+### Features
+
+- **files**: Read and write bytes and symlinks
+
 ## 0.9.0 (2026-11-13)
 
 ### Features
